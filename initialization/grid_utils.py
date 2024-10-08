@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 import open3d as o3d
+from initialization.astar_utils import astar3D
 
 class GSplatVoxel():
     def __init__(self, gsplat, lower_bound, upper_bound, resolution, radius, device):
@@ -8,19 +9,24 @@ class GSplatVoxel():
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
 
+        self.radius = radius            # Robot radius
+        self.device = device
+
         self.resolution = resolution    # Can be a vector (discretization per dimension) or a scalar
         if isinstance(self.resolution, int):
             self.resolution = torch.tensor([self.resolution, self.resolution, self.resolution], device=self.device)
         
-        self.radius = radius            # Robot radius
-        self.device = device
 
         # Define max and minimum indices
         self.min_index = torch.zeros(3, dtype=int, device=self.device)
         self.max_index = torch.tensor(self.resolution, dtype=int, device=self.device) - 1
-        self.cell_sizes = (upper_bound - lower_bound) / self.resolution[None, :]
+        self.cell_sizes = (upper_bound - lower_bound) / self.resolution
 
-        self.create_navigable_grid()
+        self.grid_centers = None
+        self.non_navigable_grid = None
+
+        with torch.no_grad():
+            self.create_navigable_grid()
 
     # We employ a subdividing strategy to populate the voxel grid in order to avoid
     # having to check every point/index in the grid with all bounding boxes in the scene
@@ -29,36 +35,62 @@ class GSplatVoxel():
     def create_navigable_grid(self):
 
         # Create a grid
-        self.navigable_grid = torch.zeros(self.resolution, dtype=bool, device=self.device)
+        self.non_navigable_grid = torch.zeros( (self.resolution[0], self.resolution[1], self.resolution[2]), dtype=bool, device=self.device)
 
         # ...along with its corresponding grid centers
         X, Y, Z = torch.meshgrid(
-            torch.linspace(self.lower_bound[0], self.upper_bound[0], self.resolution[0]),
-            torch.linspace(self.lower_bound[1], self.upper_bound[1], self.resolution[1]),
-            torch.linspace(self.lower_bound[2], self.upper_bound[2], self.resolution[2])
+            torch.linspace(self.lower_bound[0] + self.cell_sizes[0]/2, self.upper_bound[0] - self.cell_sizes[0]/2, self.resolution[0], device=self.device),
+            torch.linspace(self.lower_bound[1] + self.cell_sizes[1]/2, self.upper_bound[1] - self.cell_sizes[1]/2, self.resolution[1], device=self.device),
+            torch.linspace(self.lower_bound[2] + self.cell_sizes[2]/2, self.upper_bound[2] - self.cell_sizes[2]/2, self.resolution[2], device=self.device)
         )
-        grid_points = torch.stack([X, Y, Z], dim=-1)
+        self.grid_centers = torch.stack([X, Y, Z], dim=-1)
 
         # Compute the bounding box properties, accounting for robot radius inflation
-        bb_min = self.gsplat.means - torch.sqrt(torch.diagonal(self.gsplat.covs)) - self.radius
-        bb_max = self.gsplat.means + torch.sqrt(torch.diagonal(self.gsplat.covs)) + self.radius
+        bb_min = self.gsplat.means - torch.sqrt(torch.diagonal(self.gsplat.covs, dim1=1, dim2=2)) - self.radius
+        bb_max = self.gsplat.means + torch.sqrt(torch.diagonal(self.gsplat.covs, dim1=1, dim2=2)) + self.radius
         #bb_center = self.gsplat.means
 
         # Optional?: Mask out ellipsoids that have bounding boxes outside of grid bounds
 
+        # The vertices are min, max, min + x, min + y, min + z, min + xy, min + xz, min + yz
+        axes_mask = [torch.tensor([0, 0, 0], device=self.device),
+                torch.tensor([1, 0, 0], device=self.device),
+                torch.tensor([0, 1, 0], device=self.device),
+                torch.tensor([0, 0, 1], device=self.device),
+                torch.tensor([1, 1, 0], device=self.device),
+                torch.tensor([1, 0, 1], device=self.device),
+                torch.tensor([0, 1, 1], device=self.device),
+                torch.tensor([1, 1, 1], device=self.device)]
+
+
         # Subdivide the bounding box until it fits into the grid resolution
-        lowers = []
-        uppers = []
+        # lowers = []
+        # uppers = []
+        counter = 0
         while len(bb_min) > 0:
             # Compute the size of the bounding box
             bb_size = bb_max - bb_min
 
             # Check if the bounding box fits into the grid resolution
-            mask = torch.all(bb_size - self.resolution[None, :] <= 0., dim=-1)      # If true, the bounding box fits into the grid resolution and we pop
+            mask = torch.all(bb_size - self.cell_sizes[None, :] <= 0., dim=-1)      # If true, the bounding box fits into the grid resolution and we pop
 
             # TODO:??? Do we need to check if what we append is only one element?
-            lowers.append(bb_min[mask])
-            uppers.append(bb_max[mask])
+            # lowers.append(bb_min[mask])
+            # uppers.append(bb_max[mask])
+            bb_min_keep = bb_min[mask]
+            bb_size_keep = bb_size[mask]
+            if len(bb_min_keep) > 0:
+                for axis_mask in axes_mask:
+                    vertices = bb_min_keep + axis_mask[None, :] * bb_size_keep
+                    # Bin the vertices into the navigable grid
+                    shifted_vertices = vertices - (self.grid_centers[0, 0, 0])          # N x 3
+
+                    vertex_index = torch.round( shifted_vertices / self.cell_sizes[None, :] ).to(dtype=int)
+
+                    # Check if the vertex or subdivision is within the grid bounds. If not, ignore.
+                    in_grid = ( torch.all( (self.max_index - vertex_index) >= 0. , dim=-1) ) & ( torch.all( vertex_index >= 0. , dim=-1) ) 
+                    vertex_index = vertex_index[in_grid]
+                    self.non_navigable_grid[vertex_index[:,0], vertex_index[:,1], vertex_index[:,2]] = True
 
             # If the bounding box does not fit within the subdivisions, divide the max dimension by 2
 
@@ -68,9 +100,9 @@ class GSplatVoxel():
             bb_size = bb_size[~mask]
 
             # Calculate the ratio in order to know which dimension to divide by
-            bb_ratio = bb_size / self.resolution[None, :]
+            bb_ratio = bb_size / self.cell_sizes[None, :]
             max_dim = torch.argmax(bb_ratio, dim=-1)
-            indices_to_change = torch.stack([torch.arange(max_dim.shape[0]), max_dim], dim=-1)  # N x 2
+            indices_to_change = torch.stack([torch.arange(max_dim.shape[0], device=self.device), max_dim], dim=-1)  # N x 2
 
             # Create a left and right partition (effectively doubling the size of the bounding box variables)
             bb_min_1 = bb_min.clone()
@@ -84,56 +116,131 @@ class GSplatVoxel():
             bb_min = torch.cat([bb_min_1, bb_min_2], dim=0)
             bb_max = torch.cat([bb_max_1, bb_max_2], dim=0)
 
-        lowers = torch.cat(lowers, dim=0)
-        uppers = torch.cat(uppers, dim=0)
+            print('Iteration:', counter)
+            counter += 1
+
+        ### THIS IS LEGACY AND PURELY FOR REFERENCE ###
+        # bb_min = torch.cat(lowers, dim=0)
+        # bb_max = torch.cat(uppers, dim=0)
 
         # Compute vertices for all subdivisions
-        bb_size = bb_max - bb_min
+        # bb_size = bb_max - bb_min
 
-        # The vertices are min, max, min + x, min + y, min + z, min + xy, min + xz, min + yz
-        bb_min_plus_x = bb_min.clone()
-        bb_min_plus_x[:, 0] += bb_size[:, 0]
+        # bb_min_plus_x = bb_min.clone()
+        # bb_min_plus_x[:, 0] += bb_size[:, 0]
 
-        bb_min_plus_y = bb_min.clone()
-        bb_min_plus_y[:, 1] += bb_size[:, 1]
+        # bb_min_plus_y = bb_min.clone()
+        # bb_min_plus_y[:, 1] += bb_size[:, 1]
 
-        bb_min_plus_z = bb_min.clone()
-        bb_min_plus_z[:, 2] += bb_size[:, 2]
+        # bb_min_plus_z = bb_min.clone()
+        # bb_min_plus_z[:, 2] += bb_size[:, 2]
 
-        bb_min_plus_xy = bb_min.clone()
-        bb_min_plus_xy[:, [0, 1]] += bb_size[:, [0, 1]]
+        # bb_min_plus_xy = bb_min.clone()
+        # bb_min_plus_xy[:, [0, 1]] += bb_size[:, [0, 1]]
 
-        bb_min_plus_xz = bb_min.clone()
-        bb_min_plus_xz[:, [0, 2]] += bb_size[:, [0, 2]]
+        # bb_min_plus_xz = bb_min.clone()
+        # bb_min_plus_xz[:, [0, 2]] += bb_size[:, [0, 2]]
 
-        bb_min_plus_yz = bb_min.clone()
-        bb_min_plus_yz[:, [1, 2]] += bb_size[:, [1, 2]]
+        # bb_min_plus_yz = bb_min.clone()
+        # bb_min_plus_yz[:, [1, 2]] += bb_size[:, [1, 2]]
 
-        vertices = torch.cat([
-            bb_min,
-            bb_max,
-            bb_min_plus_x,
-            bb_min_plus_y,
-            bb_min_plus_z,
-            bb_min_plus_xy,
-            bb_min_plus_xz,
-            bb_min_plus_yz
-        ], dim=0)
+        # vertices = torch.cat([
+        #     bb_min,
+        #     bb_max,
+        #     bb_min_plus_x,
+        #     bb_min_plus_y,
+        #     bb_min_plus_z,
+        #     bb_min_plus_xy,
+        #     bb_min_plus_xz,
+        #     bb_min_plus_yz
+        # ], dim=0)
+        # for axis_mask in axes_mask:
+        #     vertices = bb_min + axis_mask[None, :] * bb_size
+        #     # Bin the vertices into the navigable grid
+        #     shifted_vertices = vertices - (self.lower_bound + self.cell_sizes/2)          # N x 3
 
-        # Bin the vertices into the navigable grid
-        shifted_vertices = vertices - self.lower_bound          # N x 3
+        #     vertex_index = torch.round( shifted_vertices / self.cell_sizes[None, :] ).to(dtype=int)
 
-        vertex_index = torch.round( shifted_vertices / self.resolution[None, :] )
-
-        # Check if the vertex or subdivision is within the grid bounds. If not, ignore.
-        in_grid = ( torch.all( (self.max_index - vertex_index) >= 0. , dim=-1) ) & ( torch.all( vertex_index >= 0. , dim=-1) ) 
-        vertex_index = vertex_index[in_grid]
-        self.navigable_grid[vertex_index[:,0], vertex_index[:,1], vertex_index[:,2]] = True
+        #     # Check if the vertex or subdivision is within the grid bounds. If not, ignore.
+        #     in_grid = ( torch.all( (self.max_index - vertex_index) >= 0. , dim=-1) ) & ( torch.all( vertex_index >= 0. , dim=-1) ) 
+        #     vertex_index = vertex_index[in_grid]
+        #     self.non_navigable_grid[vertex_index[:,0], vertex_index[:,1], vertex_index[:,2]] = True
 
         return
     
-    def create_mesh(self):
+    def create_mesh(self, save_path=None):
         # Create a mesh from the navigable grid
-        mesh = o3d.geometry.TriangleMesh.create_from_voxel_grid(self.navigable_grid, voxel_size=self.resolution[0], origin=self.lower_bound, color=[0.5, 0.5, 0.5])
-        return mesh
-  
+        non_navigable_grid_centers = self.grid_centers[self.non_navigable_grid]
+        non_navigable_grid_centers_flatten = non_navigable_grid_centers.view(-1, 3).cpu().numpy()
+
+        scene = o3d.geometry.TriangleMesh()
+        for cell_center in non_navigable_grid_centers_flatten:
+            box = o3d.geometry.TriangleMesh.create_box(width=self.cell_sizes[0].cpu().numpy(), 
+                                                        height=self.cell_sizes[1].cpu().numpy(), 
+                                                        depth=self.cell_sizes[2].cpu().numpy())
+            box = box.translate(cell_center, relative=False)
+            scene += box
+
+        if save_path is not None:
+            o3d.io.write_triangle_mesh(save_path, scene, print_progress=True)
+
+        return scene
+
+    def create_path(self, x0, xf):
+        source = self.get_indices(x0)   # Find nearest grid point and find its index
+        target = self.get_indices(xf)
+
+        source_occupied = self.non_navigable_grid[source[0], source[1], source[2]]
+        target_occupied = self.non_navigable_grid[target[0], target[1], target[2]]
+
+        # If either target or source is occupied, we do a nearest neighbor search to find the closest navigable point
+        if target_occupied:
+            print('Target is in occupied voxel. Projecting end point to closest unoccupied.')
+
+            xf = self.find_closest_navigable(xf)
+            target = self.get_indices(xf)
+
+        if source_occupied:
+            print('Source is in occupied voxel. Projecting starting point to closest unoccupied.')
+
+            x0 = self.find_closest_navigable(x0)
+            source = self.get_indices(x0)
+        
+        # Plans A*. Only accepts numpy objects. Returns numpy array N x 3.
+        path3d, indices = astar3D(self.non_navigable_grid.cpu().numpy(), source.cpu().numpy(), target.cpu().numpy(), self.grid_centers.cpu().numpy())
+
+        try:
+            assert len(path3d) > 0
+        except:
+            print('Could not find a feasible initialize path. Please change the initial/final positions to not be in collision.')
+            path3d = None
+
+        return path3d
+
+    def get_indices(self, point):
+        transformed_pt = point - self.grid_centers[0, 0, 0]
+
+        indices = torch.round(transformed_pt / self.cell_sizes).to(dtype=int)
+
+        # If querying points outside of the bounds, project to the nearest side
+        for i, ind in enumerate(indices):
+            if ind < 0.:
+                indices[i] = 0
+
+                print('Point is outside of minimum bounds. Projecting to nearest side. This may cause unintended behavior.')
+
+            elif ind > self.non_navigable_grid.shape[i]-1:
+                indices[i] = self.non_navigable_grid.shape[i]-1
+
+                print('Point is outside of maximum bounds. Projecting to nearest side. This may cause unintended behavior.')
+
+        return indices
+
+    def find_closest_navigable(self, point):
+        navigable_centers = self.grid_centers[~self.non_navigable_grid].reshape(-1, 3)
+        dist = torch.norm(navigable_centers - point[None, :], dim=-1)
+        min_point_idx = torch.argmin(dist)
+
+        closest_navigable = navigable_centers[min_point_idx]
+
+        return closest_navigable

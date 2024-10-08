@@ -7,7 +7,7 @@ import numpy as np
 from tqdm import tqdm
 import json
 
-from splat.gsplat import GSplatLoader
+from splat.splat_utils import GSplatLoader
 from cbf.cbf_utils import CBF
 from dynamics.systems import DoubleIntegrator, double_integrator_dynamics
 

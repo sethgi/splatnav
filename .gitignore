@@ -1,0 +1,10 @@
+data
+outputs
+blender_envs
+trajs
+*.obj
+*.ply
+*.png
+*.jpg
+*.jpeg
+*.ply

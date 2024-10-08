@@ -2,6 +2,8 @@ import bpy
 
 import sys, os
 
+from pathlib import Path
+
 from mathutils import Matrix, Vector
 
 import math
@@ -14,25 +16,29 @@ from numpy import linalg as la
     
 ################### FOR OUR METHOD ################################
 
-exp_name = 'stonehenge'
-base = bpy.path.abspath('//') + f'{exp_name}_all_traj.json'
-# base = bpy.path.abspath('//') + f'{exp_name}_traj.json'
+scene_name = 'flight'
+base = Path(bpy.path.abspath('//'))
+parent = base.parent
 
-my_coll = bpy.data.collections.new(f'{exp_name}')
+data_filepath = os.path.join(parent, f'trajs/{scene_name}_astar_test.json')
+
+my_coll = bpy.data.collections.new(f'{scene_name}')
 bpy.context.scene.collection.children.link(my_coll)
 # material = bpy.data.materials["Material.004"]
 
 #start_obj = bpy.data.objects['start']
 #end_obj = bpy.data.objects['end']
 
-with open(base, 'r') as f:
+with open(data_filepath, 'r') as f:
     meta = json.load(f)
 
-trajs = meta["traj"]
+datum = meta["total_data"]
+robot_radius = meta["radius"]
 
-for i, traj in enumerate([trajs]):
+for i, data in enumerate(datum):
+    traj = data["traj"]
     if len(traj) > 0:
-        traj = np.array(traj)[..., :3, -1]
+        traj = np.array(traj)[..., :3]
 
 #        #FOR AXES
 #        start_pt = bpy.data.objects.new(f'start_point{iter}', start_obj.data)
@@ -66,7 +72,7 @@ for i, traj in enumerate([trajs]):
 
         # make a new object with the curve
         obj = bpy.data.objects.new(f'traj_{i}', crv)
-        obj.data.bevel_depth = 0.03
+        obj.data.bevel_depth = robot_radius
         # obj.data.materials.append(material)
         my_coll.objects.link(obj)
 
