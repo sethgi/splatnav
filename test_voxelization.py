@@ -8,11 +8,14 @@ import json
 
 from splat.splat_utils import GSplatLoader
 from initialization.grid_utils import GSplatVoxel
+from polytopes.collision_set import GSplatCollisionSet
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 # Parameters for robot
 radius = 0.02
+vmax = 0.1
+amax = 0.1
 
 scene_name = 'flight'
 save_path = scene_name + '_voxelized.obj'
@@ -61,6 +64,9 @@ tnow = time.time()
 path = gsplat_voxel.create_path(x0, xf)
 print('Time to create path:', time.time() - tnow)
 
+#%% Visualize bounding boxes
+collision_set = GSplatCollisionSet(gsplat, vmax, amax, radius, device)
+A, b = collision_set.compute_set(torch.tensor(path, device=device), save_path=scene_name)
 #%%
 total_data = []
 data = {
