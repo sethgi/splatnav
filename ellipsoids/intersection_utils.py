@@ -27,8 +27,110 @@ def compute_intersection_linear_motion(x0, delta_x, R_A, S_A, mu_A, R_B=None, S_
         s_l = torch.zeros(R_A.shape[0], device=R_A.device)      # lower bound
         s_u = torch.ones(R_A.shape[0], device=R_A.device)       # upper bound
 
+        s_bounds = torch.stack([s_l, s_u], dim=-1)     # N x 2
+
         for iter in range(N):
-            eval_pts = 0.5*(s_l + s_u)     # midpoint
+            eval_pts = 0.5*( torch.sum( s_bounds, dim=-1) )     # midpoint
+
+            # compute the Q matrix
+            Q = eval_fn(eval_pts)       # N x dim x dim
+
+            delta_x_Q = (Q @ delta_x.unsqueeze(-1)).squeeze()      # N x dim
+            Q_diff = torch.bmm(Q, (mu_A - x0.unsqueeze(0)).unsqueeze(-1)).squeeze()      # N x dim
+
+            numerator = torch.sum(delta_x_Q * Q_diff, dim=-1)   # N
+            denominator = torch.sum(delta_x_Q**2, dim=-1)    # N
+
+            t = torch.clamp(numerator / denominator, 0., 1.)        # N
+
+            # Compute the derivative of K(s)
+            x_opt = x0.unsqueeze(0) + t.unsqueeze(-1) * delta_x.unsqueeze(0)
+            quadratic = x_opt - mu_A
+
+            v = torch.sum(quadratic[..., None] * Phi, dim=-2)      # N x dim 
+
+            s_grad_diag_numerator = kappa - 2*(eval_pts*kappa)[..., None] - (eval_pts**2)[..., None] * (lambdas - kappa)    # N x dim
+            s_grad_diag_denominator = (kappa + eval_pts[..., None]*(lambdas - kappa))**2    # N x dim
+            s_grad_diag = s_grad_diag_numerator / s_grad_diag_denominator           # N x dim
+            s_grad = torch.sum( s_grad_diag * (v**2) , dim=-1 )   # N
+
+            # Update the bounds
+            mask = (s_grad >= 0.)
+            s_bounds[mask, 0] = eval_pts[mask]
+            s_bounds[~mask, 1] = eval_pts[~mask]
+
+        # Optimal point along line segment
+        deltas = x_opt - mu_A
+        Q_opt = torch.bmm(Q.transpose(-2, -1), Q)      # N x dim x dim
+        K_opt = torch.bmm(Q, (deltas).unsqueeze(-1)).squeeze()      # N x dim
+        K_opt = torch.sum(K_opt**2, dim=-1)      # N            delta_j Q delta_j
+
+        # Is the line intersecting?
+        is_intersect = (K_opt > 1.)
+
+        output = {
+            'seedpoint': x_opt,
+            'deltas': deltas,
+            'Q_opt': Q_opt,
+            'K_opt': K_opt,
+            'mu_A': mu_A,
+            'is_intersect': is_intersect
+        }
+        
+    # TODO: We need to redo the uniform sampling for the line segment. Raise not implemented for now...
+    elif mode == 'uniform':
+        raise NotImplementedError('Uniform sampling not implemented yet')
+
+        # eval_pts = torch.linspace(0., 1., N+2, device=R_A.device)[1:-1].reshape(1, -1, 1)
+
+        # if collision_type == 'sphere':
+        #     # S_B needs to be the robot radius
+        #     try:
+        #         assert len(S_B.shape) == 1, 'S_B must be a scalar'
+        #     except:
+        #         raise ValueError('S_B must be a scalar')
+
+        #     is_intersect, K_values = gs_sphere_intersection_test(R_A, S_A, S_B, mu_A, mu_B, eval_pts)
+
+        # elif collision_type == 'ellipsoid':
+        #     is_intersect, K_values = ellipsoid_intersection_test(R_A, S_A, mu_A, R_B, S_B, mu_B, eval_pts)
+
+        # else:
+        #     raise ValueError('Collision type not supported')
+        
+    else:
+        raise ValueError('Mode not supported')
+    
+    # Return a dictionary of variables
+    return output
+
+# Computes the intersection criterion for a set of means for the robot ellipsoid
+# TODO: This function is not yet implemented.
+def compute_intersection_point(R_A, S_A, mu_A, R_B=None, S_B=None, mu_B=None, collision_type='sphere', mode='bisection', N=10):
+
+    raise NotImplementedError('Not implemented yet')
+
+    if mode == 'bisection':
+        if collision_type == 'sphere':
+            # S_B needs to be the robot radius
+            assert len(S_B.shape) == 1, 'S_B must be a scalar'
+
+            eval_fn = lambda evals: compute_sphere_ellipsoid_Q(R_A, S_A, S_B, evals)
+
+        elif collision_type == 'ellipsoid':
+            eval_fn = lambda evals: compute_ellipsoid_ellipsoid_Q(R_A, S_A, R_B, S_B, evals)
+
+        else:
+            raise ValueError('Collision type not supported')
+        
+        # Run the bisection algorithm
+        s_l = torch.zeros(R_A.shape[0], device=R_A.device)      # lower bound
+        s_u = torch.ones(R_A.shape[0], device=R_A.device)       # upper bound
+
+        s_bounds = torch.stack([s_l, s_u], dim=-1)     # N x 2
+
+        for iter in range(N):
+            eval_pts = 0.5*( torch.sum( s_bounds, dim=-1) )     # midpoint
 
             # compute the Q matrix
             Q = eval_fn(eval_pts)       # N x dim x dim
@@ -44,9 +146,23 @@ def compute_intersection_linear_motion(x0, delta_x, R_A, S_A, mu_A, R_B=None, S_
             # Compute the derivative of K(s)
             quadratic = x0.unsqueeze(0) + t.unsqueeze(-1) * delta_x.unsqueeze(0) - mu_A.unsqueeze(0)
 
-            v = torch.sum(quadratic[..., None] * Phi, dim=-2)      # N x dim    
+            v = torch.sum(quadratic[..., None] * Phi, dim=-2)      # N x dim 
+
+            s_grad_diag_numerator = kappa - 2*(eval_pts*kappa)[..., None] - (eval_pts**2)[..., None] * (lambdas - kappa)    # N x dim
+            s_grad_diag_denominator = (kappa + eval_pts[..., None]*(lambdas - kappa))**2    # N x dim
+            s_grad_diag = s_grad_diag_numerator / s_grad_diag_denominator           # N x dim
+            s_grad = torch.sum( s_grad_diag * (v**2) , dim=-1 )   # N
+
+            # Update the bounds
+            mask = (s_grad >= 0.)
+            s_bounds[mask, 0] = eval_pts[mask]
+            s_bounds[~mask, 1] = eval_pts[~mask]
+
         
+    # TODO: We need to redo the uniform sampling for the line segment. Raise not implemented for now...
     elif mode == 'uniform':
+        raise NotImplementedError('Uniform sampling not implemented yet')
+
         eval_pts = torch.linspace(0., 1., N+2, device=R_A.device)[1:-1].reshape(1, -1, 1)
 
         if collision_type == 'sphere':
@@ -66,11 +182,6 @@ def compute_intersection_linear_motion(x0, delta_x, R_A, S_A, mu_A, R_B=None, S_
         
     else:
         raise ValueError('Mode not supported')
-    
-    # Return a dictionary of variables
-
-
-
 
 
 # TODO: ALLOW FOR BOTH UNIFORM SAMPLING OR BISECTION SEARCH !!!
