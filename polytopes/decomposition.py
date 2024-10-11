@@ -1,51 +1,60 @@
-import numpy as np
 import torch
-from ellipsoids.intersection_utils import gs_sphere_intersection_eval
 
-# TODO: We should specify what type of method we are using (sphere or ellipsoid, and sampling or bisection)
-# TODO: This function needs a big refactor and split into multiple functions and naming conventions
-def compute_supporting_hyperplanes(R, D, kappa, mu_A, test_pt, tau):
+def compute_polytope(deltas, Q, K, mu):
+        
+    delta_Q = torch.bmm(Q, deltas[..., None])
+    rhs = torch.sqrt(K) + torch.sum(delta_Q * mu, dim=-1)
 
-    batch = R.shape[0]
-    dim = R.shape[-1]
+    A = -delta_Q.squeeze()
+    b = -rhs
 
-    evals = gs_sphere_intersection_eval(R, D, kappa, mu_A, test_pt, tau)
+    # Boundary point (compute just for reference)
+    boundary_points = mu + deltas / torch.sqrt(K)[..., None]
 
-    K_j = evals[0]
-    inds = evals[1]
+    return A, b, boundary_points
 
-    ss = torch.linspace(0., 1., 100, device=R.device)[1:-1]
-    s_max = ss[inds]
+# def compute_supporting_hyperplanes(R, D, kappa, mu_A, test_pt, tau):
 
-    lambdas = D
+#     batch = R.shape[0]
+#     dim = R.shape[-1]
 
-    S_j_flat = (s_max*(1-s_max))[..., None] / (kappa + s_max[..., None] * (lambdas - kappa))
+#     evals = gs_sphere_intersection_eval(R, D, kappa, mu_A, test_pt, tau)
 
-    S_j = torch.diag_embed(S_j_flat)
-    A_j = torch.bmm(R, torch.bmm(S_j, R.transpose(1, 2)))
+#     K_j = evals[0]
+#     inds = evals[1]
 
-    delta_j = test_pt - mu_A
+#     ss = torch.linspace(0., 1., 100, device=R.device)[1:-1]
+#     s_max = ss[inds]
 
-    A = -torch.bmm(delta_j.reshape(batch, 1, -1), A_j).squeeze()
-    b = -torch.sqrt(K_j) + torch.sum(A*mu_A, dim=-1)
+#     lambdas = D
 
-    proj_points = mu_A + delta_j / torch.sqrt(K_j)[..., None]
+#     S_j_flat = (s_max*(1-s_max))[..., None] / (kappa + s_max[..., None] * (lambdas - kappa))
 
-    # TODO: Leaves the polytopes as tensors
-    return A.cpu().numpy().reshape(-1, dim), b.cpu().numpy().reshape(-1, 1), proj_points.cpu().numpy()
+#     S_j = torch.diag_embed(S_j_flat)
+#     A_j = torch.bmm(R, torch.bmm(S_j, R.transpose(1, 2)))
 
-#  TODO: Pull this into a class
-def compute_polytope(R, D, kappa, mu_A, test_pt, tau, A_bound, b_bound):
-    # Find safe polytope in A <= b form
-    A, b, _ = compute_supporting_hyperplanes(R, D, kappa, mu_A, test_pt, tau)
+#     delta_j = test_pt - mu_A
 
-    # A, b = A.cpu().numpy(), b.cpu().numpy()
+#     A = -torch.bmm(delta_j.reshape(batch, 1, -1), A_j).squeeze()
+#     b = -torch.sqrt(K_j) + torch.sum(A*mu_A, dim=-1)
 
-    dim = mu_A.shape[-1]
+#     proj_points = mu_A + delta_j / torch.sqrt(K_j)[..., None]
 
-    # Add in the bounding poly constraints
-    A = np.concatenate([A.reshape(-1, dim), A_bound.reshape(-1, dim)], axis=0)
-    b = np.concatenate([b.reshape(-1, 1), b_bound.reshape(-1, 1)], axis=0)
+#     # TODO: Leaves the polytopes as tensors
+#     return A.cpu().numpy().reshape(-1, dim), b.cpu().numpy().reshape(-1, 1), proj_points.cpu().numpy()
 
-    # TODO: Leave polytopes as tensors
-    return A, b
+# #  TODO: Pull this into a class
+# def compute_polytope(R, D, kappa, mu_A, test_pt, tau, A_bound, b_bound):
+#     # Find safe polytope in A <= b form
+#     A, b, _ = compute_supporting_hyperplanes(R, D, kappa, mu_A, test_pt, tau)
+
+#     # A, b = A.cpu().numpy(), b.cpu().numpy()
+
+#     dim = mu_A.shape[-1]
+
+#     # Add in the bounding poly constraints
+#     A = np.concatenate([A.reshape(-1, dim), A_bound.reshape(-1, dim)], axis=0)
+#     b = np.concatenate([b.reshape(-1, 1), b_bound.reshape(-1, 1)], axis=0)
+
+#     # TODO: Leave polytopes as tensors
+#     return A, b

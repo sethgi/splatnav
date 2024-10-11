@@ -13,12 +13,14 @@ def compute_intersection_linear_motion(x0, delta_x, R_A, S_A, mu_A, R_B=None, S_
     if mode == 'bisection':
         if collision_type == 'sphere':
             # S_B needs to be the robot radius
-            assert len(S_B.shape) == 1, 'S_B must be a scalar'
+            assert isinstance(S_B, float) # 'S_B must be a scalar'
 
             eval_fn = lambda evals: compute_sphere_ellipsoid_Q(R_A, S_A, S_B, evals)
+            lambdas, Phi, kappa = compute_K_parameters_sphere(R_A, S_A, S_B)
 
         elif collision_type == 'ellipsoid':
             eval_fn = lambda evals: compute_ellipsoid_ellipsoid_Q(R_A, S_A, R_B, S_B, evals)
+            lambdas, Phi, kappa = compute_K_parameters_ellipsoid(R_A, S_A, R_B, S_B)
 
         else:
             raise ValueError('Collision type not supported')
@@ -66,7 +68,7 @@ def compute_intersection_linear_motion(x0, delta_x, R_A, S_A, mu_A, R_B=None, S_
         K_opt = torch.sum(K_opt**2, dim=-1)      # N            delta_j Q delta_j
 
         # Is the line intersecting?
-        is_intersect = (K_opt > 1.)
+        is_not_intersect = (K_opt > 1.)
 
         output = {
             'seedpoint': x_opt,
@@ -74,7 +76,7 @@ def compute_intersection_linear_motion(x0, delta_x, R_A, S_A, mu_A, R_B=None, S_
             'Q_opt': Q_opt,
             'K_opt': K_opt,
             'mu_A': mu_A,
-            'is_intersect': is_intersect
+            'is_not_intersect': is_not_intersect
         }
         
     # TODO: We need to redo the uniform sampling for the line segment. Raise not implemented for now...
@@ -237,6 +239,19 @@ def ellipsoid_intersection_test_helper(Sigma_A, Sigma_B, mu_A, mu_B):
     v_squared = (torch.bmm(Phi.transpose(1, 2), (mu_A - mu_B)[..., None])).squeeze() ** 2
     return lambdas, Phi, v_squared
 
+def compute_K_parameters_ellipsoid(R_A, S_A, R_B, S_B):
+    # Compute the covariance
+    Cov_A_half = torch.bmm(R_A, S_A)        # N x dim x dim
+    Cov_A = torch.bmm(Cov_A_half, Cov_A_half.transpose(-2, -1))
+
+    Cov_B_half = R_B @ S_B
+    Cov_B = Cov_B_half @ Cov_B_half.transpose(-2, -1)
+
+    lambdas, Phi = generalized_eigen(Cov_A, Cov_B) # eigh(Sigma_A, b=Sigma_B)
+    kappa = 1.
+
+    return lambdas, Phi, kappa
+
 ### ________________________________________INTERSECTION TEST FOR SPHERE-TO-ELLIPSOID____________________________________________________ ###
 def gs_sphere_intersection_test(R, S, radius, mu_A, mu_B, eval_pts):
     lambdas, v_squared = gs_sphere_intersection_test_helper(R, S, mu_A, mu_B)  # (batchdim x statedim), (batchdim x statedim x statedim), (batchdim x statedim)
@@ -251,6 +266,13 @@ def gs_sphere_intersection_test(R, S, radius, mu_A, mu_B, eval_pts):
 def gs_sphere_intersection_test_helper(R, S, mu_A, mu_B):
     lambdas, v_squared = S**2, (torch.bmm(R.transpose(1, 2), (mu_A - mu_B)[..., None])).squeeze() ** 2
     return lambdas, v_squared
+
+def compute_K_parameters_sphere(R_A, S_A, radius):
+    lambdas = S_A**2
+    Phi = R_A
+    kappa = radius**2
+
+    return lambdas, Phi, kappa
 
 def K_function(lambdas, v_squared, kappa, eval_pts):
     batchdim = lambdas.shape[0]
