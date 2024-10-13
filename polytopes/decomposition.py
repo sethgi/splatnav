@@ -2,7 +2,7 @@ import torch
 
 def compute_polytope(deltas, Q, K, mu):
         
-    delta_Q = torch.bmm(Q, deltas[..., None])
+    delta_Q = torch.bmm(Q, deltas[..., None]).squeeze()
     rhs = torch.sqrt(K) + torch.sum(delta_Q * mu, dim=-1)
 
     A = -delta_Q.squeeze()

@@ -62,19 +62,41 @@ means = torch.tensor(means, dtype=torch.float32, device=device)
 
 #%%
 
-delta_x = torch.tensor([0.75, 0.0], device=device)
-x0 = torch.tensor([-0.25, 0.], device=device)
+# delta_x = torch.tensor([0.75, 0.0], device=device)
+# x0 = torch.tensor([-0.25, 0.], device=device)
+
+# delta_x = 1.5*torch.tensor([1., 1.], device=device)
+# x0 = torch.tensor([-0.75, -0.75], device=device)
+
+x0 = torch.tensor([0., 0.], device=device)
+delta_x = 0.25*torch.tensor([1., 1.], device=device)
+
 
 # robot parameters
 radius = 0.25
 
+R_B = np.random.rand(4)
+R_B /= np.linalg.norm(R_B)
+R_B = Rotation.from_quat(R_B).as_matrix()
+R_B = torch.tensor(R_B, dtype=torch.float32, device=device)[:n_dim, :n_dim]
+S_B = torch.rand(n_dim, device=device) * 0.1 + 0.05
+
 torch.cuda.synchronize()
 tnow = time.time()
+# output = compute_intersection_linear_motion(x0, delta_x, rots, scales, means, 
+#                                    R_B=None, S_B=radius, collision_type='sphere', 
+#                                    mode='bisection', N=10)
 output = compute_intersection_linear_motion(x0, delta_x, rots, scales, means, 
-                                   R_B=None, S_B=radius, collision_type='sphere', 
+                                   R_B=R_B, S_B=S_B, collision_type='ellipsoid', 
                                    mode='bisection', N=10)
 torch.cuda.synchronize()
 print('Time to compute intersections:', time.time() - tnow)
+
+torch.cuda.synchronize()
+tnow = time.time()
+A, b, pts = compute_polytope(output['deltas'], output['Q_opt'], output['K_opt'], output['mu_A'])
+torch.cuda.synchronize()
+print('Time to compute polytopes:', time.time() - tnow)
 #%% Plot ellipsoids
 fig, ax = plt.subplots(1, figsize=(10, 10))
 
@@ -83,12 +105,17 @@ robot_plot_kwargs = {
     'edgecolor': None,
     'alpha': 0.5
 }
+t = np.linspace(0, 1, 100)
 robot_line = x0[None, :] + torch.tensor(t[:, None], device=device) * delta_x[None, :]
-Sigma_B = torch.eye(n_dim) * (radius**2)
+# Sigma_B = torch.eye(n_dim) * (radius**2)
+Sigma_B = R_B * S_B[None, :]
+Sigma_B = Sigma_B @ Sigma_B.T
 
+# plot robot body along the line
 for pt in robot_line:
     plot_ellipse(pt, Sigma_B, 1., ax, **robot_plot_kwargs)
 
+# plot ellipsoids and colored red if they intersect
 not_intersects = output['is_not_intersect']
 for (rot, scale, mean, not_intersect) in zip(rots, scales, means, not_intersects):
     
@@ -108,6 +135,12 @@ for (rot, scale, mean, not_intersect) in zip(rots, scales, means, not_intersects
 
     plot_ellipse(mean, Sigma, 1., ax, **ellipsoid_plot_kwargs)
 
+# plot polytope
+poly = polytope.Polytope(A.cpu().numpy(), b.cpu().numpy())
+plot_polytope(poly, ax)
+
+# plot the pivot points
+ax.scatter(pts[:, 0].cpu().numpy(), pts[:, 1].cpu().numpy(), color='black', s=10)
 
 ax.set_xlim(-1, 1)
 ax.set_ylim(-1, 1)

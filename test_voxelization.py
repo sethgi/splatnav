@@ -66,7 +66,7 @@ print('Time to create path:', time.time() - tnow)
 
 #%% Visualize bounding boxes
 collision_set = GSplatCollisionSet(gsplat, vmax, amax, radius, device)
-A, b = collision_set.compute_set(torch.tensor(path, device=device), save_path=scene_name)
+output = collision_set.compute_set(torch.tensor(path, device=device), save_path=scene_name)
 #%%
 total_data = []
 data = {

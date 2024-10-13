@@ -63,12 +63,12 @@ def compute_intersection_linear_motion(x0, delta_x, R_A, S_A, mu_A, R_B=None, S_
 
         # Optimal point along line segment
         deltas = x_opt - mu_A
-        Q_opt = torch.bmm(Q.transpose(-2, -1), Q)      # N x dim x dim
+        Q_opt = torch.bmm(Q.transpose(-2, -1), Q).squeeze()      # N x dim x dim
         K_opt = torch.bmm(Q, (deltas).unsqueeze(-1)).squeeze()      # N x dim
         K_opt = torch.sum(K_opt**2, dim=-1)      # N            delta_j Q delta_j
 
         # Is the line intersecting?
-        is_not_intersect = (K_opt > 1.)
+        is_not_intersect = (K_opt >= 1.)
 
         output = {
             'seedpoint': x_opt,
@@ -219,10 +219,11 @@ def generalized_eigen(A, B):
 
 def ellipsoid_intersection_test(R_A, S_A, mu_A, R_B, S_B, mu_B, eval_pts):
     # Compute the covariance
-    Cov_A_half = torch.bmm(R_A, S_A)        # N x dim x dim
+    # Cov_A_half = torch.bmm(R_A, S_A)        # N x dim x dim
+    Cov_A_half = R_A * S_A[..., None, :]
     Cov_A = torch.bmm(Cov_A_half, Cov_A_half.transpose(-2, -1))
 
-    Cov_B_half = R_B @ S_B
+    Cov_B_half = R_B * S_B[None, :]
     Cov_B = Cov_B_half @ Cov_B_half.transpose(-2, -1)
 
     lambdas, _, v_squared = ellipsoid_intersection_test_helper(Cov_A, Cov_B, mu_A, mu_B)  # (batchdim x statedim), (batchdim x statedim x statedim), (batchdim x statedim)
@@ -241,10 +242,11 @@ def ellipsoid_intersection_test_helper(Sigma_A, Sigma_B, mu_A, mu_B):
 
 def compute_K_parameters_ellipsoid(R_A, S_A, R_B, S_B):
     # Compute the covariance
-    Cov_A_half = torch.bmm(R_A, S_A)        # N x dim x dim
+    # Cov_A_half = torch.bmm(R_A, S_A)        # N x dim x dim
+    Cov_A_half = R_A * S_A[..., None, :]
     Cov_A = torch.bmm(Cov_A_half, Cov_A_half.transpose(-2, -1))
 
-    Cov_B_half = R_B @ S_B
+    Cov_B_half = R_B * S_B[None, :]
     Cov_B = Cov_B_half @ Cov_B_half.transpose(-2, -1)
 
     lambdas, Phi = generalized_eigen(Cov_A, Cov_B) # eigh(Sigma_A, b=Sigma_B)
@@ -286,7 +288,7 @@ def compute_Q(lambdas, Phi, kappa, eval_pts):
     denominator = kappa + eval_pts[:, None] * ( lambdas - kappa )    # N x dim
     diag = torch.sqrt(numerator[:, None] / denominator)                 # N x dim
 
-    Q = diag[..., None] * Phi   # N x dim x dim
+    Q = diag[..., None] * Phi.transpose(-2, -1)   # N x dim x dim
 
     return Q
 
@@ -298,10 +300,10 @@ def compute_ellipsoid_ellipsoid_parameters(Sigma_A, Sigma_B):
 def compute_ellipsoid_ellipsoid_Q(R_A, S_A, R_B, S_B, eval_pts):
 
     # Compute the covariance
-    Cov_A_half = torch.bmm(R_A, S_A)        # N x dim x dim
+    Cov_A_half = R_A * S_A[..., None, :]
     Cov_A = torch.bmm(Cov_A_half, Cov_A_half.transpose(-2, -1))
 
-    Cov_B_half = R_B @ S_B
+    Cov_B_half = R_B * S_B[None, :]
     Cov_B = Cov_B_half @ Cov_B_half.transpose(-2, -1)
 
     # Compute generalized eigenvalue problem
