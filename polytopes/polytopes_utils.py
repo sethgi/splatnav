@@ -8,18 +8,19 @@ def h_rep_minimal(A, b, pt):
     halfspaces = np.concatenate([A, -b[..., None]], axis=-1)
     hs = scipy.spatial.HalfspaceIntersection(halfspaces, pt, incremental=False, qhull_options=None)
 
+    qhull_pts = hs.intersections
     # NOTE: It's possible that hs.dual_vertices errors out due to it not being to handle large number of facets. In that case, use the following code:
     try:
         minimal_Ab = halfspaces[hs.dual_vertices]
     except:
-        qhull_pts = hs.intersections
         convex_hull = scipy.spatial.ConvexHull(qhull_pts, incremental=False, qhull_options=None)
         minimal_Ab = convex_hull.equations
+    
 
     minimal_A = minimal_Ab[:, :-1]
     minimal_b = -minimal_Ab[:, -1]
 
-    return minimal_A, minimal_b
+    return minimal_A, minimal_b, qhull_pts
 
 def find_interior(A, b):
     # by way of Chebyshev center

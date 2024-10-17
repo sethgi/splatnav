@@ -84,6 +84,16 @@ class GSplatLoader():
         success = o3d.io.write_triangle_mesh(filepath, scene, print_progress=True)
 
         return success
+
+
+# Loader for GSplat means 
+class PointCloudLoader(GSplatLoader):
+    def __init__(self, device):
+        self.device = device
+
+    def initialize_attributes(self, means):
+        self.means = means.to(self.device)
+        return
     
 # The purpose of this loader is to run toy examples and for figures.
 class DummyGSplatLoader(GSplatLoader):
