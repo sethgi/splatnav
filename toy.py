@@ -16,7 +16,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # We will initialize Gaussians in a C shape with the robot starting at the center and moving outward.
 
 # Parameters
-n_gaussians = 10        # per side
+n_gaussians = 20        # per side
 n_dim = 2
 t = np.linspace(0, 1, n_gaussians)
 
@@ -62,18 +62,17 @@ means = torch.tensor(means, dtype=torch.float32, device=device)
 
 #%%
 
-# delta_x = torch.tensor([0.75, 0.0], device=device)
-# x0 = torch.tensor([-0.25, 0.], device=device)
+delta_x = torch.tensor([0.75, 0.0], device=device)
+x0 = torch.tensor([-0.25, 0.], device=device)
 
 # delta_x = 1.5*torch.tensor([1., 1.], device=device)
 # x0 = torch.tensor([-0.75, -0.75], device=device)
 
-x0 = torch.tensor([0., 0.], device=device)
-delta_x = 0.25*torch.tensor([1., 1.], device=device)
-
+# x0 = torch.tensor([0., 0.], device=device)
+# delta_x = 0.25*torch.tensor([1., 1.], device=device)
 
 # robot parameters
-radius = 0.25
+radius = 0.15
 
 R_B = np.random.rand(4)
 R_B /= np.linalg.norm(R_B)
@@ -83,12 +82,12 @@ S_B = torch.rand(n_dim, device=device) * 0.1 + 0.05
 
 torch.cuda.synchronize()
 tnow = time.time()
-# output = compute_intersection_linear_motion(x0, delta_x, rots, scales, means, 
-#                                    R_B=None, S_B=radius, collision_type='sphere', 
-#                                    mode='bisection', N=10)
 output = compute_intersection_linear_motion(x0, delta_x, rots, scales, means, 
-                                   R_B=R_B, S_B=S_B, collision_type='ellipsoid', 
+                                   R_B=None, S_B=radius, collision_type='sphere', 
                                    mode='bisection', N=10)
+# output = compute_intersection_linear_motion(x0, delta_x, rots, scales, means, 
+#                                    R_B=R_B, S_B=S_B, collision_type='ellipsoid', 
+#                                    mode='bisection', N=10)
 torch.cuda.synchronize()
 print('Time to compute intersections:', time.time() - tnow)
 
@@ -107,9 +106,9 @@ robot_plot_kwargs = {
 }
 t = np.linspace(0, 1, 100)
 robot_line = x0[None, :] + torch.tensor(t[:, None], device=device) * delta_x[None, :]
-# Sigma_B = torch.eye(n_dim) * (radius**2)
-Sigma_B = R_B * S_B[None, :]
-Sigma_B = Sigma_B @ Sigma_B.T
+Sigma_B = torch.eye(n_dim) * (radius**2)
+# Sigma_B = R_B * S_B[None, :]
+# Sigma_B = Sigma_B @ Sigma_B.T
 
 # plot robot body along the line
 for pt in robot_line:
@@ -141,6 +140,10 @@ plot_polytope(poly, ax)
 
 # plot the pivot points
 ax.scatter(pts[:, 0].cpu().numpy(), pts[:, 1].cpu().numpy(), color='black', s=10)
+
+# plot config
+ax.scatter(x0[0].cpu().numpy(), x0[1].cpu().numpy(), color='red', s=10)
+ax.scatter(x0[0].cpu().numpy() + delta_x[0].cpu().numpy(), x0[1].cpu().numpy() + delta_x[1].cpu().numpy(), color='red', s=10)
 
 ax.set_xlim(-1, 1)
 ax.set_ylim(-1, 1)
