@@ -77,18 +77,20 @@ class SplatPlan():
             # TODO: !!!
             gs_ids = data['gaussian_ids']
 
-            # Not in collision with anything, so skip
-            if len(gs_ids) == 0:
-                continue
-
             A_bb = data['A_bb']
             b_bb = data['b_bb_shrunk']
             segment = data['path']
             delta_x = segment[1] - segment[0]
 
+            # print(segment[0])
+            # print(segment[1])
+            # print('Line segments')
+
             midpoint = data['midpoint']
 
-            if len(gs_ids) == 1:
+            if len(gs_ids) == 0:
+                continue
+            elif len(gs_ids) == 1:
                 rots = data['rots'].expand(2, -1, -1)
                 scales = data['scales'].expand(2, -1)
                 means = data['means'].expand(2, -1)
@@ -97,11 +99,28 @@ class SplatPlan():
                 scales = data['scales']
                 means = data['means']
 
-            intersection_output = compute_intersection_linear_motion(x0, delta_x, rots, scales, means, 
+            intersection_output = compute_intersection_linear_motion(segment[0], delta_x, rots, scales, means, 
                                     R_B=None, S_B=self.radius, collision_type='sphere', 
                                     mode='bisection', N=10)
 
+            # check1 = torch.einsum('bij, bjk, bkl->bil', (segment[0][None] - intersection_output['mu_A'])[..., None, :], intersection_output['Q_opt'], 
+            #              (segment[0][None] - intersection_output['mu_A'])[..., None] ).squeeze()
+            # check2 = torch.einsum('bij, bjk, bkl->bil', (segment[1][None] - intersection_output['mu_A'])[..., None, :], intersection_output['Q_opt'], 
+            #         (segment[1][None] - intersection_output['mu_A'])[..., None] ).squeeze()
+            
+            # try:
+            #     assert torch.all(check1 - intersection_output['K_opt'] >= -1e-4)
+            #     assert torch.all(check2 - intersection_output['K_opt'] >= -1e-4)
+            # except:
+            #     print(f"Check failed {data['id']}", check1, check2, intersection_output['K_opt'])
+
             A, b, pts = compute_polytope(intersection_output['deltas'], intersection_output['Q_opt'], intersection_output['K_opt'], intersection_output['mu_A'])
+
+            # check_boundary = torch.abs((torch.sum( A * pts, dim=-1) - b)) < 1e-4
+            # try:
+            #     assert check_boundary.all()
+            # except:
+            #     print(f"Check boundary failed {data['id']}", check_boundary)
 
             # The full polytope is a concatenation of the intersection polytope and the bounding box polytope
             A = torch.cat([A, A_bb], dim=0)
@@ -111,33 +130,36 @@ class SplatPlan():
             A = A / norm_A
             b = b / norm_A.squeeze()
 
-            # criterion = torch.all( (A @ segment.T - b[:, None]) <= 0., dim=0 )
+            #criterion = torch.all( (A @ segment.T - b[:, None]) <= 0., dim=0 )
             # print(criterion)
             # try:
+            #     #print(f"Criterion {data['id']}", (A @ segment.T - b[:, None]).max(dim=0))
             #     assert criterion.all()
             # except:
-            #     print(intersection_output['is_not_intersect'].all())
+            #     print(f"Criterion failed {data['id']}", criterion)
+            #     #print(f"If failed, print intersection output {data['id']}", intersection_output['is_not_intersect'].all())
 
             # We want to prune the number of constraints in A and b in case there are redundant constraints. The midpoint should always be feasible
             # given manageability. 
             # TODO: Make sure this function doesn't have errors. If it does, somehow your midpoint is not feasible, and we may want to choose another
             # point that is feasible.
 
-            try:
-                interior_pt = find_interior(A.cpu().numpy(), b.cpu().numpy())
-                assert interior_pt is not None
-                A, b = h_rep_minimal(A.cpu().numpy(), b.cpu().numpy(), interior_pt)
+            # try:
+            #     interior_pt = find_interior(A.cpu().numpy(), b.cpu().numpy())
+            #     assert interior_pt is not None
+            #     A, b = h_rep_minimal(A.cpu().numpy(), b.cpu().numpy(), interior_pt)
 
-                #polytopes.append((A, b))
-                As.append(torch.tensor(A, device=self.device))
-                bs.append(torch.tensor(b, device=self.device))
-                path.append(midpoint)
-            except:
-                print('Interior point not found. Skipping polytope.')
-                continue
-
+            #     #polytopes.append((A, b))
+            #     As.append(torch.tensor(A, device=self.device))
+            #     bs.append(torch.tensor(b, device=self.device))
+            #     path.append(midpoint)
+            # except:
+            #     print('Interior point not found. Skipping polytope.')
+            #     continue
+            As.append(torch.tensor(A, device=self.device))
+            bs.append(torch.tensor(b, device=self.device))
         self.save_polytope(As, bs, savepath + '_polytope.obj')
-        return #polytopes
+        return
 
     def save_polytope(self, A, b, save_path):
         # Initialize mesh object
