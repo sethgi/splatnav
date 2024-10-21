@@ -28,10 +28,8 @@ t_z = 10*np.linspace(0, 2*np.pi, n)
 # TODO: splatplan-single-step, A*
 ### ----------------- Possible Distance Types ----------------- ###
 
-for scene_name in ['flight']:
+for scene_name in ['stonehenge', 'statues', 'flight', 'old_union']:
     for method in ['splatplan']:
-
-        resolution = 100
 
         # NOTE: POPULATE THE UPPER AND LOWER BOUNDS FOR OTHER SCENES!!!
         if scene_name == 'old_union':
@@ -45,6 +43,11 @@ for scene_name in ['flight']:
             amax = 0.1
             vmax = 0.1
 
+            lower_bound = torch.tensor([-.8, -.7, -0.2], device=device)
+            upper_bound = torch.tensor([1., 1., -0.1], device=device)
+
+            resolution = 75
+
         elif scene_name == 'stonehenge':
             radius_z = 0.01
             radius_config = 0.784/2
@@ -56,6 +59,11 @@ for scene_name in ['flight']:
             amax = 0.1
             vmax = 0.1
 
+            lower_bound = torch.tensor([-5., -.5, -0.], device=device)
+            upper_bound = torch.tensor([5., .5, 0.1], device=device)
+
+            resolution = 40
+
         elif scene_name == 'statues':
             radius_z = 0.03    
             radius_config = 0.475
@@ -66,6 +74,11 @@ for scene_name in ['flight']:
             radius = 0.03
             amax = 0.1
             vmax = 0.1
+
+            lower_bound = torch.tensor([-.5, -.5, -0.1], device=device)
+            upper_bound = torch.tensor([.5, .5, 0.2], device=device)
+
+            resolution = 60
 
         elif scene_name == 'flight':
             radius_z = 0.06
@@ -80,6 +93,8 @@ for scene_name in ['flight']:
 
             lower_bound = torch.tensor([-1.33, -0.5, -0.17], device=device)
             upper_bound = torch.tensor([1, 0.5, 0.26], device=device)
+
+            resolution = 100
 
         # elif scene_name == 'flight-low-res':
         #     radius_z = 0.06

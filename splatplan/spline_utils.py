@@ -274,8 +274,8 @@ class SplinePlanner():
             print('Clarabel did not solve the problem!')
             solver_success = False
             solution = None
+            self.coeffs = None
 
-            return None, solver_success
         else:
             solver_success = True
             solution = np.array(sol.x)
@@ -288,7 +288,7 @@ class SplinePlanner():
                 coeffs.append(cof)
             self.coeffs = np.array(coeffs)
 
-            return self.coeffs, solver_success
+        return self.coeffs, solver_success
 
     def eval_b_spline(self):
         T = self.time_pts['time_pts'].cpu().numpy()
@@ -297,20 +297,24 @@ class SplinePlanner():
         dddT = self.time_pts['ddd_time_pts'].cpu().numpy()
         ddddT = self.time_pts['dddd_time_pts'].cpu().numpy()
 
-        full_traj = []
-        for i, coeff in enumerate(self.coeffs):
-            if i < len(self.coeffs) - 1:
-                pos = (coeff @ T[:, :-1]).T
-                vel = (coeff @ dT[:, :-1]).T
-                acc = (coeff @ ddT[:, :-1]).T
-                jerk = (coeff @ dddT[:, :-1]).T
-            else:
-                pos = (coeff @ T).T
-                vel = (coeff @ dT).T
-                acc = (coeff @ ddT).T
-                jerk = (coeff @ dddT).T
+        if self.coeffs is not None:
+            full_traj = []
+            for i, coeff in enumerate(self.coeffs):
+                if i < len(self.coeffs) - 1:
+                    pos = (coeff @ T[:, :-1]).T
+                    vel = (coeff @ dT[:, :-1]).T
+                    acc = (coeff @ ddT[:, :-1]).T
+                    jerk = (coeff @ dddT[:, :-1]).T
+                else:
+                    pos = (coeff @ T).T
+                    vel = (coeff @ dT).T
+                    acc = (coeff @ ddT).T
+                    jerk = (coeff @ dddT).T
 
-            sub_traj = np.concatenate([pos, vel, acc, jerk], axis=-1)
-            full_traj.append(sub_traj)
+                sub_traj = np.concatenate([pos, vel, acc, jerk], axis=-1)
+                full_traj.append(sub_traj)
 
-        return np.concatenate(full_traj, axis=0)
+            return np.concatenate(full_traj, axis=0)
+        
+        else:
+            return None
