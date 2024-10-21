@@ -2,6 +2,8 @@ import numpy as np
 import scipy
 import torch
 import open3d as o3d
+import time
+
 from ellipsoids.mesh_utils import create_gs_mesh
 from ellipsoids.covariance_utils import quaternion_to_rotation_matrix
 
@@ -103,6 +105,12 @@ class GSplatCollisionSet():
 
         self.rs = vmax**2 / (2*amax) + self.radius    # Safety radius
 
+        self.means = self.gsplat.means
+        self.rots = quaternion_to_rotation_matrix(self.gsplat.rots)
+        self.scales = self.gsplat.scales
+        self.gaussian_ids = torch.arange(self.means.shape[0], device=self.device)
+     
+    # NOTE: THIS COMPUTES THE COLLISION SET FOR ALL LINE SEGMENTS IN THE PATH!!!
     def compute_set(self, path, save_path=None):
 
         # Compute the bounding box
@@ -114,22 +122,16 @@ class GSplatCollisionSet():
 
         # TODO: We could definitely batch this. However, there's not a big need for this since we are only considering one line segment at a time.
         gaussian_collision_set = []
-
-        means = self.gsplat.means
-        rots = quaternion_to_rotation_matrix(self.gsplat.rots)
-        scales = self.gsplat.scales
-
-        gaussian_ids = torch.arange(means.shape[0], device=self.device)
         
         collision_set_ids = []
         for i, (A0, b0) in enumerate(zip(A, b)):
 
             # This comparison tensor will be N (num of Gaussians) x 6 (num of hyperplanes)
-            a_times_mu = means @ A0.T
+            a_times_mu = self.means @ A0.T
             numerator = b0[None, :] - a_times_mu        # N x 6
 
-            a_times_R = rots.transpose(1, 2) @ A0.T # N x 3 x 6 
-            denominator = torch.linalg.norm( a_times_R * scales[..., None] , dim=1)    # N x 6
+            a_times_R = self.rots.transpose(1, 2) @ A0.T # N x 3 x 6 
+            denominator = torch.linalg.norm( a_times_R * self.scales[..., None] , dim=1)    # N x 6
 
             distance = -numerator / denominator
 
@@ -138,21 +140,21 @@ class GSplatCollisionSet():
 
             # Save the indices of the gaussians that are within the bounding box
             data = {
-                'gaussian_ids': gaussian_ids[keep_gaussian],
+                'gaussian_ids': self.gaussian_ids[keep_gaussian],
                 'A_bb': A0,
                 'b_bb': b0,
                 'b_bb_shrunk': b0 - self.radius,
                 'path': path[i:i+2],
                 'midpoint': 0.5 * (path[i] + path[i+1]),
-                'means': means[keep_gaussian],
-                'rots': rots[keep_gaussian],
-                'scales': scales[keep_gaussian],
+                'means': self.means[keep_gaussian],
+                'rots': self.rots[keep_gaussian],
+                'scales': self.scales[keep_gaussian],
                 'id': i
             }
 
             gaussian_collision_set.append(data)
 
-            collision_set_ids.append(gaussian_ids[keep_gaussian])
+            collision_set_ids.append(self.gaussian_ids[keep_gaussian])
 
         # We want to save the bounding box as a viewable mesh using Open3d
         if save_path is not None:
@@ -161,6 +163,48 @@ class GSplatCollisionSet():
 
         # Return a dictionary of the Gaussian collision set and the shrunk bounding box constraints representing only the free space for the robot centroid.
         return gaussian_collision_set
+    
+    # NOTE: THIS COMPUTES THE COLLISION SET FOR ONE LINE SEGMENT IN THE PATH!!!
+    def compute_set_one_step(self, segment):
+
+        # Compute the bounding box
+        A, b = compute_bounding_box(segment, self.rs)
+        A = A.squeeze()
+        b = b.squeeze()
+
+        # tnow = time.time()
+        # torch.cuda.synchronize()
+        
+        # This comparison tensor will be N (num of Gaussians) x 6 (num of hyperplanes)
+        a_times_mu = self.means @ A.T
+        numerator = b[None, :] - a_times_mu        # N x 6
+
+        a_times_R = self.rots.transpose(1, 2) @ A.T # N x 3 x 6 
+        denominator = torch.linalg.norm( a_times_R * self.scales[..., None] , dim=1)    # N x 6
+
+        distance = -numerator / denominator
+
+        # A gaussian must satisfy the metric for all 6 hyperplanes
+        keep_gaussian = (distance <= 1.).all(dim=-1)      # mask of length N
+
+        # torch.cuda.synchronize()
+        # print('Time to compute gsplat check:', time.time() - tnow)
+
+        # Save the indices of the gaussians that are within the bounding box
+        output = {
+            'gaussian_ids': self.gaussian_ids[keep_gaussian],
+            'A_bb': A,
+            'b_bb': b,
+            'b_bb_shrunk': b - self.radius,
+            'path': segment,
+            'midpoint': 0.5*(segment[0] + segment[1]),
+            'means': self.means[keep_gaussian],
+            'rots': self.rots[keep_gaussian],
+            'scales': self.scales[keep_gaussian],
+        }
+
+        # Return a dictionary of the Gaussian collision set and the shrunk bounding box constraints representing only the free space for the robot centroid.
+        return output
     
     def save_collision_set(self, gaussian_ids, save_path):
 

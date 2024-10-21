@@ -17,10 +17,11 @@ from numpy import linalg as la
 ################### FOR OUR METHOD ################################
 
 scene_name = 'flight'
+method = 'splatplan'
 base = Path(bpy.path.abspath('//'))
 parent = base.parent
 
-data_filepath = os.path.join(parent, f'trajs/{scene_name}_astar_test.json')
+data_filepath = os.path.join(parent, f'trajs/{scene_name}_{method}.json')
 
 my_coll = bpy.data.collections.new(f'{scene_name}')
 bpy.context.scene.collection.children.link(my_coll)
@@ -37,7 +38,7 @@ robot_radius = meta["radius"]
 
 for i, data in enumerate(datum):
     traj = data["traj"]
-    if len(traj) > 0:
+    if len(traj) > 2:
         traj = np.array(traj)[..., :3]
 
 #        #FOR AXES

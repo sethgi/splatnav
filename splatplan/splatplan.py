@@ -6,14 +6,14 @@ from scipy import sparse
 import clarabel
 import time
 
-from polytopes.polytopes_utils import h_rep_minimal, find_interior, compute_path_in_polytope
+from polytopes.polytopes_utils import h_rep_minimal, find_interior, compute_segment_in_polytope
 from initialization.grid_utils import GSplatVoxel
 from polytopes.collision_set import GSplatCollisionSet
 from polytopes.decomposition import compute_polytope
 from ellipsoids.intersection_utils import compute_intersection_linear_motion
 
 class SplatPlan():
-    def __init__(self, gsplat, robot_config, env_config, device):
+    def __init__(self, gsplat, robot_config, env_config, spline_planner, device):
         # gsplat: GSplat object
 
         self.gsplat = gsplat
@@ -36,6 +36,9 @@ class SplatPlan():
         torch.cuda.synchronize()
         print('Time to create GSplatVoxel:', time.time() - tnow)
 
+        # Spline planner
+        self.spline_planner = spline_planner
+
         # Save the mesh
         # gsplat_voxel.create_mesh(save_path=save_path)
         # gsplat.save_mesh(scene_name + '_gsplat.obj')
@@ -45,134 +48,141 @@ class SplatPlan():
         self.times_qp = []
         self.times_prune = []
 
-    def generate_path(self, x0, xf, savepath=None):
+    def generate_path(self, x0, xf):
         # Part 1: Computes the path seed using A*
         tnow = time.time()
         path = self.gsplat_voxel.create_path(x0, xf)
-        print('Time to create path:', time.time() - tnow)
+        torch.cuda.synchronize()
+        time_astar = time.time() - tnow
 
-        # Part 2: Computes the collision set
-        output = self.collision_set.compute_set(torch.tensor(path, device=self.device))
-            # data = {
-            #     'gaussian_ids': gaussian_ids[keep_gaussian],
-            #     'A_bb': A0,
-            #     'b_bb': b0,
-            #     'b_bb_shrunk': b0 - self.radius,
-            #     'path': path[i:i+2],
-            #     'midpoint': 0.5 * (path[i] + path[i+1]),
-            #     'means': means[keep_gaussian],
-            #     'rots': rots[keep_gaussian],
-            #     'scales': scales[keep_gaussian],
-            #     'id': i
-            # }
+        times_collision_set = 0
+        times_polytope = 0
 
-        # Part 3: Computes the polytope
-        # polytopes = []
-        As = []
-        bs = []
-        path = []
-        for data in output:
-            # For every single line segment, we always create a polytope at the first line segment, 
-            # and then we subsequently check if future line segments are within the polytope before creating new ones.
-            # TODO: !!!
-            gs_ids = data['gaussian_ids']
+        polytopes = []      # List of polytopes (A, b)
+        segments = torch.tensor(np.stack([path[:-1], path[1:]], axis=1), device=self.device)
 
-            A_bb = data['A_bb']
-            b_bb = data['b_bb_shrunk']
-            segment = data['path']
-            delta_x = segment[1] - segment[0]
+        for it, segment in enumerate(segments):
+            # If this is the first line segment, we always create a polytope. Or subsequently, we only instantiate a polytope if the line segment
+            if it == 0:
 
-            # print(segment[0])
-            # print(segment[1])
-            # print('Line segments')
+                # Part 2: Computes the collision set
 
-            midpoint = data['midpoint']
+                tnow = time.time()
+                output = self.collision_set.compute_set_one_step(segment)
+                torch.cuda.synchronize()
+                times_collision_set += time.time() - tnow
 
-            if len(gs_ids) == 0:
-                continue
-            elif len(gs_ids) == 1:
-                rots = data['rots'].expand(2, -1, -1)
-                scales = data['scales'].expand(2, -1)
-                means = data['means'].expand(2, -1)
+                # Part 3: Computes the polytope
+                tnow = time.time()
+                polytope = self.get_polytope_from_outputs(output)
+                torch.cuda.synchronize()
+                times_polytope += time.time() - tnow
+
             else:
-                rots = data['rots']
-                scales = data['scales']
-                means = data['means']
+                # Test if the line segment is within the polytope
+                # If the segment is within the polytope, we proceed to next segment
+                if compute_segment_in_polytope(polytope[0], polytope[1], segment):
 
-            intersection_output = compute_intersection_linear_motion(segment[0], delta_x, rots, scales, means, 
-                                    R_B=None, S_B=self.radius, collision_type='sphere', 
-                                    mode='bisection', N=10)
+                    continue
 
-            # check1 = torch.einsum('bij, bjk, bkl->bil', (segment[0][None] - intersection_output['mu_A'])[..., None, :], intersection_output['Q_opt'], 
-            #              (segment[0][None] - intersection_output['mu_A'])[..., None] ).squeeze()
-            # check2 = torch.einsum('bij, bjk, bkl->bil', (segment[1][None] - intersection_output['mu_A'])[..., None, :], intersection_output['Q_opt'], 
-            #         (segment[1][None] - intersection_output['mu_A'])[..., None] ).squeeze()
-            
-            # try:
-            #     assert torch.all(check1 - intersection_output['K_opt'] >= -1e-4)
-            #     assert torch.all(check2 - intersection_output['K_opt'] >= -1e-4)
-            # except:
-            #     print(f"Check failed {data['id']}", check1, check2, intersection_output['K_opt'])
+                else:
+                    # If the segment is not within the polytope, we create a new polytope
+                    # Part 2: Computes the collision set
 
-            A, b, pts = compute_polytope(intersection_output['deltas'], intersection_output['Q_opt'], intersection_output['K_opt'], intersection_output['mu_A'])
+                    tnow = time.time()
+                    output = self.collision_set.compute_set_one_step(segment)
+                    torch.cuda.synchronize()
+                    times_collision_set += time.time() - tnow 
 
-            # check_boundary = torch.abs((torch.sum( A * pts, dim=-1) - b)) < 1e-4
-            # try:
-            #     assert check_boundary.all()
-            # except:
-            #     print(f"Check boundary failed {data['id']}", check_boundary)
+                    # Part 3: Computes the polytope
+                    tnow = time.time()
+                    polytope = self.get_polytope_from_outputs(output)
+                    torch.cuda.synchronize()
+                    times_polytope += time.time() - tnow
 
-            # The full polytope is a concatenation of the intersection polytope and the bounding box polytope
-            A = torch.cat([A, A_bb], dim=0)
-            b = torch.cat([b, b_bb], dim=0)
+            polytopes.append(polytope)
+            #print(f"Instantiated polytope at segment {it}")
 
-            norm_A = torch.linalg.norm(A, dim=-1, keepdims=True)
-            A = A / norm_A
-            b = b / norm_A.squeeze()
+        # Step 4: Perform Bezier spline optimization
+        tnow = time.time()
+        traj, feasible = self.spline_planner.optimize_b_spline(polytopes, x0, xf)
+        if not feasible:
+            traj = torch.stack([x0, xf], dim=0)
+        torch.cuda.synchronize()
+        times_opt = time.time() - tnow
+  
+        # Save outgoing information
+        traj_data = {
+            'path': path.tolist(),
+            'polytopes': [torch.cat([polytope[0], polytope[1].unsqueeze(-1)], dim=-1).tolist() for polytope in polytopes],
+            'num_polytopes': len(polytopes),
+            'traj': traj.tolist(),
+            'times_astar': time_astar,
+            'times_collision_set': times_collision_set,
+            'times_polytope': times_polytope,
+            'times_opt': times_opt,
+            'feasible': feasible
+        }
 
-            #criterion = torch.all( (A @ segment.T - b[:, None]) <= 0., dim=0 )
-            # print(criterion)
-            # try:
-            #     #print(f"Criterion {data['id']}", (A @ segment.T - b[:, None]).max(dim=0))
-            #     assert criterion.all()
-            # except:
-            #     print(f"Criterion failed {data['id']}", criterion)
-            #     #print(f"If failed, print intersection output {data['id']}", intersection_output['is_not_intersect'].all())
+        return traj_data
+    
+    def get_polytope_from_outputs(self, data):
+        # For every single line segment, we always create a polytope at the first line segment, 
+        # and then we subsequently check if future line segments are within the polytope before creating new ones.
+        gs_ids = data['gaussian_ids']
 
-            # We want to prune the number of constraints in A and b in case there are redundant constraints. The midpoint should always be feasible
-            # given manageability. 
-            # TODO: Make sure this function doesn't have errors. If it does, somehow your midpoint is not feasible, and we may want to choose another
-            # point that is feasible.
+        A_bb = data['A_bb']
+        b_bb = data['b_bb_shrunk']
+        segment = data['path']
+        delta_x = segment[1] - segment[0]
 
-            # try:
-            #     interior_pt = find_interior(A.cpu().numpy(), b.cpu().numpy())
-            #     assert interior_pt is not None
-            #     A, b = h_rep_minimal(A.cpu().numpy(), b.cpu().numpy(), interior_pt)
+        midpoint = data['midpoint']
 
-            #     #polytopes.append((A, b))
-            #     As.append(torch.tensor(A, device=self.device))
-            #     bs.append(torch.tensor(b, device=self.device))
-            #     path.append(midpoint)
-            # except:
-            #     print('Interior point not found. Skipping polytope.')
-            #     continue
-            As.append(torch.tensor(A, device=self.device))
-            bs.append(torch.tensor(b, device=self.device))
-        self.save_polytope(As, bs, savepath + '_polytope.obj')
-        return
+        if len(gs_ids) == 0:
+            return (A_bb, b_bb)
+        elif len(gs_ids) == 1:
+            rots = data['rots'].expand(2, -1, -1)
+            scales = data['scales'].expand(2, -1)
+            means = data['means'].expand(2, -1)
+        else:
+            rots = data['rots']
+            scales = data['scales']
+            means = data['means']
 
-    def save_polytope(self, A, b, save_path):
+        # Perform the intersection test
+        intersection_output = compute_intersection_linear_motion(segment[0], delta_x, rots, scales, means, 
+                                R_B=None, S_B=self.radius, collision_type='sphere', 
+                                mode='bisection', N=10)
+
+        # Compute the polytope
+        A, b, pts = compute_polytope(intersection_output['deltas'], intersection_output['Q_opt'], intersection_output['K_opt'], intersection_output['mu_A'])
+
+        # The full polytope is a concatenation of the intersection polytope and the bounding box polytope
+        A = torch.cat([A, A_bb], dim=0)
+        b = torch.cat([b, b_bb], dim=0)
+
+        norm_A = torch.linalg.norm(A, dim=-1, keepdims=True)
+        A = A / norm_A
+        b = b / norm_A.squeeze()
+
+        # By manageability, the midpoint should always be clearly within the polytope
+        # NOTE: Let's hope there are no errors here.
+        A, b = h_rep_minimal(A.cpu().numpy(), b.cpu().numpy(), midpoint.cpu().numpy())
+
+        return (torch.tensor(A, device=self.device), torch.tensor(b, device=self.device))
+
+    def save_polytope(self, polytopes, save_path):
         # Initialize mesh object
         mesh = o3d.geometry.TriangleMesh()
 
-        for A0, b0 in zip(A, b):
+        for (A, b) in polytopes:
             # Transfer all tensors to numpy
-            A0 = A0.cpu().numpy()
-            b0 = b0.cpu().numpy()
+            A = A.cpu().numpy()
+            b = b.cpu().numpy()
 
-            pt = find_interior(A0, b0)
+            pt = find_interior(A, b)
 
-            halfspaces = np.concatenate([A0, -b0[..., None]], axis=-1)
+            halfspaces = np.concatenate([A, -b[..., None]], axis=-1)
             hs = scipy.spatial.HalfspaceIntersection(halfspaces, pt, incremental=False, qhull_options=None)
             qhull_pts = hs.intersections
 
@@ -184,51 +194,3 @@ class SplatPlan():
         success = o3d.io.write_triangle_mesh(save_path, mesh, print_progress=True)
 
         return success
-
-    # TODO: We need to make sure that we transform the u_out into the world frame from the ellipsoid frame for ellipsoid-ellipsoid
-    def solve_QP(self, x, u_des):
-        A, l, P, q = self.get_QP_matrices(x, u_des, minimal=True)
-
-        tnow = time.time()
-        u_out, success_flag = self.optimize_QP_clarabel(A, l, P, q)
-        # print('Time to solve QP:', time.time() - tnow)
-        self.times_qp.append(time.time() - tnow)
-
-        self.solver_success = success_flag
-
-        if success_flag:
-            # return the optimal control
-            u_out = torch.tensor(u_out).to(device=u_des.device, dtype=torch.float32) 
-        else:
-            # if not successful, just return the desired control but raise a warning
-            print('Solver failed. Returning desired control.')
-            u_out = u_des
-
-        return u_out
-    
-    # Clarabel is a more robust, faster solver
-    def optimize_QP_clarabel(self, A, l, P, q):
-        n_constraints = A.shape[0]
-
-        # Setup workspace
-        P = sparse.csc_matrix(P)
-        A = sparse.csc_matrix(A)    
-
-        settings = clarabel.DefaultSettings()
-        settings.verbose = False
-
-        solver = clarabel.DefaultSolver(P, q, A, l, [clarabel.NonnegativeConeT(n_constraints)], settings)
-        sol = solver.solve()
-
-         # Check solver status
-        if str(sol.status) != 'Solved':
-            print(f"Solver status: {sol.status}")
-            print(f"Number of iterations: {sol.iterations}")
-            print('Clarabel did not solve the problem!')
-            solver_success = False
-            solution = None
-        else:
-            solver_success = True
-            solution = sol.x
-
-        return solution, solver_success

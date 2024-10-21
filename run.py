@@ -9,6 +9,7 @@ import json
 
 from splat.splat_utils import GSplatLoader
 from splatplan.splatplan import SplatPlan
+from splatplan.spline_utils import SplinePlanner
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -27,7 +28,7 @@ t_z = 10*np.linspace(0, 2*np.pi, n)
 # TODO: splatplan-single-step, A*
 ### ----------------- Possible Distance Types ----------------- ###
 
-for scene_name in ['flight', 'stonehenge', 'old_union', 'statues']:
+for scene_name in ['flight']:
     for method in ['splatplan']:
 
         resolution = 100
@@ -111,13 +112,15 @@ for scene_name in ['flight', 'stonehenge', 'old_union', 'statues']:
         tnow = time.time()
         gsplat = GSplatLoader(path_to_gsplat, device)
         print('Time to load GSplat:', time.time() - tnow)
+
+        spline_planner = SplinePlanner(device=device)
         
         # # Load high res gsplat for flight-low-res for comparison
         # if scene_name == 'flight-low-res':
         #     gsplat_high_res = GSplatLoader(path_to_gsplat_high_res, device)
 
         if method == 'splatplan' or method == 'splatplan-single-step':
-            planner = SplatPlan(gsplat, robot_config, voxel_config, device)
+            planner = SplatPlan(gsplat, robot_config, voxel_config, spline_planner, device)
         
         elif method == 'sfc':
             raise NotImplementedError
@@ -143,21 +146,19 @@ for scene_name in ['flight', 'stonehenge', 'old_union', 'statues']:
             x = torch.tensor(start).to(device).to(torch.float32)
             goal = torch.tensor(goal).to(device).to(torch.float32)
 
-            traj = [x]
-            times = [0]
-            u_values = []
-            safety = []
-            sucess = []
-            feasible = []
-
             # We only do this for the single-step SplatPlan
             if method == 'splatplan' or method == 'sfc':
-                output = planner.generate_path(x, goal, savepath=scene_name)
-
-                raise NotImplementedError
+                output = planner.generate_path(x, goal)
 
             elif method == 'splatplan-single-step':
                 raise NotImplementedError
+                traj = [x]
+                times = [0]
+                u_values = []
+                safety = []
+                sucess = []
+                feasible = []
+
                 for i in tqdm(range(n_steps), desc=f"Simulating trajectory {trial}"):
                     ### ----------------- Safety Filtering ----------------- ###
                     u = cbf.solve_QP(x, u_des)
@@ -192,7 +193,7 @@ for scene_name in ['flight', 'stonehenge', 'old_union', 'statues']:
                 traj = torch.stack(traj)
                 u_values = np.array(u_values)
 
-                data = {
+                output = {
                 'traj': traj.cpu().numpy().tolist(),
                 'u_out': u_values.tolist(),
                 'time_step': times,
@@ -204,7 +205,8 @@ for scene_name in ['flight', 'stonehenge', 'old_union', 'statues']:
                 'prune_time': cbf.times_prune,
                 }
 
-            total_data.append(data)
+            total_data.append(output)
+            print(f"Trial {trial} completed")
 
         # Save trajectory
         data = {
@@ -218,7 +220,7 @@ for scene_name in ['flight', 'stonehenge', 'old_union', 'statues']:
             'mean_config': mean_config.tolist(),
             'lower_bound': lower_bound.tolist(),
             'upper_bound': upper_bound.tolist(),
-            'resolution': resolution.tolist(),
+            'resolution': resolution,
             'n_steps': n_steps,
             'n_time': n_t,
             'total_data': total_data,

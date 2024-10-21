@@ -3,9 +3,10 @@ import cvxpy as cvx
 import torch
 import sympy as sym
 import scipy
-import time
-
+import clarabel
+from scipy import sparse
 # --------------------------------------------------------------------------------#
+
 def b_spline_terms(t, deg):
     # terms are (K choose k)(1-t)**(K-k) * t**k
     terms = []
@@ -29,7 +30,7 @@ def b_spline_term_derivs(pts, deg, d):
 
     return np.array(terms).astype(np.float32)
 
-def create_time_pts(deg=8, N_sec=10, tf=1.):
+def create_time_pts(deg=8, N_sec=10, tf=1., device='cpu'):
     #Find coefficients for T splines, each connecting one waypoint to the next
     
     # THESE COEFFICIENTS YOU CAN STORE, SO YOU ONLY NEED TO COMPUTE THEM ONCE!
@@ -42,37 +43,33 @@ def create_time_pts(deg=8, N_sec=10, tf=1.):
     ddddT = b_spline_term_derivs(time_pts, deg, 4)
 
     data = {
-    'time_pts': T,
-    'd_time_pts': dT,
-    'dd_time_pts': ddT,
-    'ddd_time_pts': dddT,
-    'dddd_time_pts': ddddT
+    'time_pts': torch.tensor(T, device=device),
+    'd_time_pts': torch.tensor(dT, device=device),
+    'dd_time_pts': torch.tensor(ddT, device=device),
+    'ddd_time_pts': torch.tensor(dddT, device=device),
+    'dddd_time_pts': torch.tensor(ddddT, device=device)
     }
 
     return data
 
 ### 
-def polytopes_to_matrix(As, bs):
-    A_sparse = scipy.linalg.block_diag(*As)
-    b_sparse = np.concatenate(bs)
-
-    return A_sparse, b_sparse
-
-def get_qp_matrices(T, dT, ddT, dddT, ddddT, As, Bs, x0, xf):
+def get_qp_matrices(T, dT, ddT, dddT, ddddT, polytopes, x0, xf, device):
     
-    N_sec = len(As)
+    N_sec = len(polytopes)
     deg = T[0].shape[0]
     w = deg*N_sec*3
     k = deg*3
     k3 = deg
 
+    index = torch.arange(deg-1, device=device)
+
     # Create cost
-    Q_ = torch.eye(deg)
-    off_diag = torch.stack([torch.arange(deg-1), torch.arange(deg-1)+1], dim=-1)
-    Q_[off_diag[:, 0], off_diag[:, 1]] = -1
+    Q_ = torch.eye(deg, device=device)
+    off_diag = torch.stack([ index, index + 1 ], dim=-1)
+    Q_[off_diag[:, 0], off_diag[:, 1]] = -1.
     Q_ = Q_ + Q_.T
-    Q_[0, 0] = 1
-    Q_[-1, -1] = 1
+    Q_[0, 0] = 1.
+    Q_[-1, -1] = 1.
     Q__ = N_sec*3*[Q_]
     Q = torch.block_diag(*Q__)
 
@@ -81,15 +78,15 @@ def get_qp_matrices(T, dT, ddT, dddT, ddddT, As, Bs, x0, xf):
     b = []
 
     # Create equality matrices
-    C = torch.zeros((3* 4* N_sec, w))
-    d = torch.zeros(C.shape[0])
+    C = torch.zeros((3* 4* N_sec, w), device=device)
+    d = torch.zeros(C.shape[0], device=device)
 
     # Create cost matrix P, consisting only of jerk
     for i in range(N_sec):
+        A_ = polytopes[i][0]
+        b_ = polytopes[i][1]
 
         # Ax <= b
-        A_ = torch.tensor(As[i])
-        b_ = torch.tensor(Bs[i])
         A_x = deg*[A_[:, 0].reshape(-1, 1)]
         A_y = deg*[A_[:, 1].reshape(-1, 1)]
         A_z = deg*[A_[:, 2].reshape(-1, 1)]
@@ -104,33 +101,33 @@ def get_qp_matrices(T, dT, ddT, dddT, ddddT, As, Bs, x0, xf):
 
         # Cx = d
         if i < N_sec-1:
-            pos1_cof = torch.tensor(T[i][:, -1]).reshape(1, -1)
-            pos2_cof = torch.tensor(-T[i+1][:, 0]).reshape(1, -1)
+            pos1_cof = T[i][:, -1].reshape(1, -1)
+            pos2_cof = -T[i+1][:, 0].reshape(1, -1)
 
             p1 = torch.block_diag(pos1_cof, pos1_cof, pos1_cof)
             p2 = torch.block_diag(pos2_cof, pos2_cof, pos2_cof)
 
-            vel1_cof = torch.tensor(dT[i][:, -1]).reshape(1, -1)
-            vel2_cof = torch.tensor(-dT[i+1][:, 0]).reshape(1, -1)
+            vel1_cof = dT[i][:, -1].reshape(1, -1)
+            vel2_cof = -dT[i+1][:, 0].reshape(1, -1)
 
             v1 = torch.block_diag(vel1_cof, vel1_cof, vel1_cof)
             v2 = torch.block_diag(vel2_cof, vel2_cof, vel2_cof)
 
-            acc1_cof = torch.tensor(ddT[i][:, -1]).reshape(1, -1)
-            acc2_cof = torch.tensor(-ddT[i+1][:, 0]).reshape(1, -1)
+            acc1_cof = ddT[i][:, -1].reshape(1, -1)
+            acc2_cof = -ddT[i+1][:, 0].reshape(1, -1)
 
             a1 = torch.block_diag(acc1_cof, acc1_cof, acc1_cof)
             a2 = torch.block_diag(acc2_cof, acc2_cof, acc2_cof)
 
-            jer1_cof = torch.tensor(dddT[i][:, -1]).reshape(1, -1)
-            jer2_cof = torch.tensor(-dddT[i+1][:, 0]).reshape(1, -1)
+            jer1_cof = dddT[i][:, -1].reshape(1, -1)
+            jer2_cof = -dddT[i+1][:, 0].reshape(1, -1)
 
             j1 = torch.block_diag(jer1_cof, jer1_cof, jer1_cof)
             j2 = torch.block_diag(jer2_cof, jer2_cof, jer2_cof)
 
-            C_t1 = torch.cat([p1, v1, a1, j1], axis=0)
-            C_t2 = torch.cat([p2, v2, a2, j2], axis=0)
-            C_t = torch.cat([C_t1, C_t2], axis=-1)
+            C_t1 = torch.cat([p1, v1, a1, j1], dim=0)
+            C_t2 = torch.cat([p2, v2, a2, j2], dim=0)
+            C_t = torch.cat([C_t1, C_t2], dim=-1)
 
             n, m = C_t.shape
             n_e = m//2
@@ -142,74 +139,93 @@ def get_qp_matrices(T, dT, ddT, dddT, ddddT, As, Bs, x0, xf):
     b = b.reshape((-1,))
 
     # Append initial and final position constraints
-    p0_cof = torch.tensor(T[0][:, 0]).reshape(1, -1)
-    pf_cof = torch.tensor(T[-1][:, -1]).reshape(1, -1)
+    p0_cof = T[0][:, 0].reshape(1, -1)
+    pf_cof = T[-1][:, -1].reshape(1, -1)
 
     p0 = torch.block_diag(p0_cof, p0_cof, p0_cof)
     pf = torch.block_diag(pf_cof, pf_cof, pf_cof)
 
-    C_ = torch.zeros((3*2, w))
+    C_ = torch.zeros((3*2, w), device=device)
     C_[:3, 0:n_e] = p0
     C_[3:, -n_e:] = pf
 
-    d_ = torch.tensor(np.concatenate([x0, xf], axis=0))
+    d_ = torch.cat([x0, xf], dim=0)
 
     # Concatenate G and h matrices
-    C = torch.cat([C, C_], axis=0)
+    C = torch.cat([C, C_], dim=0)
 
-    d = torch.cat([d, d_], axis=0)
+    d = torch.cat([d, d_], dim=0)
     d = d.reshape((-1,))
 
-    return A.cpu().numpy(), b.cpu().numpy(), C.cpu().numpy(), d.cpu().numpy(), Q.cpu().numpy()
+    return A, b, C, d, Q
 
 ######################################################################################################
-
-def compute_path_from_corridor(As, bs, x0, xf):
-    # Compute path from union of polytopes
-    # TODO: Add in spline support
-
-    num_pts = len(As)
-
-    points = cvx.Variable((num_pts, 3))
-    
-    cost = cvx.pnorm(points[:-1] - points[1:])
-    obj = cvx.Minimize(cost)
-
-    A, b = polytopes_to_matrix(As, bs)
-    constraints = [A @ cvx.reshape(points, num_pts*3, order='C') <= b]
-
-    prob = cvx.Problem(obj, constraints)
-    prob.solve()
-    # prob.solve()
-
-    solved_pts = points.value
-
-    if solved_pts is not None:
-        traj = np.concatenate([x0.reshape(1, 3), solved_pts.reshape(-1, 3), xf.reshape(1, 3)], axis=0)
-        return traj
-    else:
-        return None
-    
 class SplinePlanner():
-    def __init__(self, spline_deg=6, N_sec=10) -> None:
+    def __init__(self, spline_deg=6, N_sec=10, device='cpu') -> None:
         self.spline_deg = spline_deg
-    
+        self.N_sec = N_sec
+        self.device = device
+
         ### Create the time points matrix/coefficients for the Bezier curve
-        self.time_pts = create_time_pts(deg=spline_deg, N_sec=N_sec)
+        self.time_pts = create_time_pts(deg=spline_deg, N_sec=N_sec, device=device)
 
-    def optimize_one_step(self, A, b, x0, xf):
-        tnow = time.time()
-        self.calculate_b_spline_coeff_one_step(A, b, x0, xf)
-        print('opt:', time.time() - tnow)
+    # def optimize_one_step(self, A, b, x0, xf):
+    #     self.calculate_b_spline_coeff_one_step(A, b, x0, xf)
+    #     return self.eval_b_spline()
 
-        tnow = time.time()
-        output = self.eval_b_spline()
-        print('eval:', time.time() - tnow)
+    # def calculate_b_spline_coeff_one_step(self, A, b, x0, xf):
+    #     N_sections = len(A)         #Number of segments
 
-        return output
+    #     T = self.time_pts['time_pts']
+    #     dT = self.time_pts['d_time_pts']
+    #     ddT = self.time_pts['dd_time_pts']
+    #     dddT = self.time_pts['ddd_time_pts']
+    #     ddddT = self.time_pts['dddd_time_pts']
 
-    def calculate_b_spline_coeff_one_step(self, A, b, x0, xf):
-        N_sections = len(A)         #Number of segments
+    #     # Copy time points N times
+    #     T_list = [T]*N_sections
+    #     dT_list = [dT]*N_sections
+    #     ddT_list = [ddT]*N_sections
+    #     dddT_list = [dddT]*N_sections
+    #     ddddT_list = [ddddT]*N_sections
+
+    #     #Set up CVX problem
+    #     A_prob, b_prob, C_prob, d_prob, Q_prob = get_qp_matrices(T_list, dT_list, ddT_list, dddT_list, ddddT_list, A, b, x0, xf)
+        
+    #     # eliminate endpoint constraint
+    #     C_prob = C_prob[:-3]
+    #     d_prob = d_prob[:-3]
+        
+    #     n_var = C_prob.shape[-1]
+
+    #     x = cvx.Variable(n_var)
+
+    #     final_point = cvx.reshape(x, (N_sections*3, -1), order='C')[-3:, -1]
+
+    #     obj = cvx.Minimize(cvx.quad_form(x, Q_prob) + cvx.quad_form(final_point - xf, np.eye(3)))
+
+    #     constraints = [A_prob @ x <= b_prob, C_prob @ x == d_prob]
+
+    #     prob = cvx.Problem(obj, constraints)
+
+    #     prob.solve(solver='CLARABEL')
+        
+    #     coeffs = []
+    #     cof_splits = np.split(x.value, N_sections)
+    #     for cof_split in cof_splits:
+    #         xyz = np.split(cof_split, 3)
+    #         cof = np.stack(xyz, axis=0)
+    #         coeffs.append(cof)
+
+    #     self.coeffs = np.array(coeffs)
+    #     return self.coeffs, prob.value
+
+    def optimize_b_spline(self, polytopes, x0, xf):
+        _, solver_success = self.calculate_b_spline_coeff(polytopes, x0, xf)
+        return self.eval_b_spline(), solver_success
+
+    def calculate_b_spline_coeff(self, polytopes, x0, xf):
+        N_sections = len(polytopes)         #Number of segments
 
         T = self.time_pts['time_pts']
         dT = self.time_pts['d_time_pts']
@@ -224,94 +240,76 @@ class SplinePlanner():
         dddT_list = [dddT]*N_sections
         ddddT_list = [ddddT]*N_sections
 
-        #Set up CVX problem
-        A_prob, b_prob, C_prob, d_prob, Q_prob = get_qp_matrices(T_list, dT_list, ddT_list, dddT_list, ddddT_list, A, b, x0, xf)
-        
-        # eliminate endpoint constraint
-        C_prob = C_prob[:-3]
-        d_prob = d_prob[:-3]
-        
+        #Set up matrices
+        A_prob, b_prob, C_prob, d_prob, Q_prob = get_qp_matrices(T_list, dT_list, ddT_list, dddT_list, ddddT_list, polytopes, x0, xf, self.device)
         n_var = C_prob.shape[-1]
 
-        x = cvx.Variable(n_var)
+        A_prob = A_prob.cpu().numpy()
+        b_prob = b_prob.cpu().numpy()
+        C_prob = C_prob.cpu().numpy()
+        d_prob = d_prob.cpu().numpy()
+        Q_prob = Q_prob.cpu().numpy()
 
-        final_point = cvx.reshape(x, (N_sections*3, -1), order='C')[-3:, -1]
+        ###### CLARABEL #######
 
-        obj = cvx.Minimize(cvx.quad_form(x, Q_prob)) # + cvx.norm(final_point - xf))
+        P = sparse.csc_matrix(Q_prob)
+        A = sparse.csc_matrix(np.concatenate([C_prob, A_prob], axis=0))
 
-        constraints = [A_prob @ x <= b_prob, C_prob @ x == d_prob]
+        q = np.zeros(n_var)
+        b = np.concatenate([d_prob, b_prob], axis=0)
 
-        prob = cvx.Problem(obj, constraints)
+        cones = [clarabel.ZeroConeT(C_prob.shape[0]), clarabel.NonnegativeConeT(A_prob.shape[0])]
 
-        prob.solve(solver='CLARABEL')
-        
-        coeffs = []
-        cof_splits = np.split(x.value, N_sections)
-        for cof_split in cof_splits:
-            xyz = np.split(cof_split, 3)
-            cof = np.stack(xyz, axis=0)
-            coeffs.append(cof)
+        settings = clarabel.DefaultSettings()
+        settings.verbose = False
 
-        self.coeffs = np.array(coeffs)
-        return self.coeffs, prob.value
+        solver = clarabel.DefaultSolver(P, q, A, b, cones, settings)
 
-    def optimize_b_spline(self, As, Bs, x0, xf):
-        self.calculate_b_spline_coeff(As, Bs, x0, xf)
-        return self.eval_b_spline()
+        sol = solver.solve()
 
-    def calculate_b_spline_coeff(self, As, Bs, x0, xf):
-        N_sections = len(As)         #Number of segments
+        # Check solver status
+        if str(sol.status) != 'Solved':
+            print(f"Solver status: {sol.status}")
+            #print(f"Number of iterations: {sol.iterations}")
+            print('Clarabel did not solve the problem!')
+            solver_success = False
+            solution = None
 
-        T = self.time_pts['time_pts']
-        dT = self.time_pts['d_time_pts']
-        ddT = self.time_pts['dd_time_pts']
-        dddT = self.time_pts['ddd_time_pts']
-        ddddT = self.time_pts['dddd_time_pts']
+            return None, solver_success
+        else:
+            solver_success = True
+            solution = np.array(sol.x)
 
-        # Copy time points N times
-        T_list = [T]*N_sections
-        dT_list = [dT]*N_sections
-        ddT_list = [ddT]*N_sections
-        dddT_list = [dddT]*N_sections
-        ddddT_list = [ddddT]*N_sections
+            coeffs = []
+            cof_splits = np.split(solution, N_sections)
+            for cof_split in cof_splits:
+                xyz = np.split(cof_split, 3)
+                cof = np.stack(xyz, axis=0)
+                coeffs.append(cof)
+            self.coeffs = np.array(coeffs)
 
-        #Set up CVX problem
-        A_prob, b_prob, C_prob, d_prob, Q_prob = get_qp_matrices(T_list, dT_list, ddT_list, dddT_list, ddddT_list, As, Bs, x0, xf)
-        n_var = C_prob.shape[-1]
-
-        x = cvx.Variable(n_var)
-
-        obj = cvx.Minimize(cvx.quad_form(x, Q_prob))
-
-        constraints = [A_prob @ x <= b_prob, C_prob @ x == d_prob]
-
-        prob = cvx.Problem(obj, constraints)
-
-        prob.solve(solver='CLARABEL')
-        
-        coeffs = []
-        cof_splits = np.split(x.value, N_sections)
-        for cof_split in cof_splits:
-            xyz = np.split(cof_split, 3)
-            cof = np.stack(xyz, axis=0)
-            coeffs.append(cof)
-
-        self.coeffs = np.array(coeffs)
-        return self.coeffs, prob.value
+            return self.coeffs, solver_success
 
     def eval_b_spline(self):
-        T = self.time_pts['time_pts']
-        dT = self.time_pts['d_time_pts']
-        ddT = self.time_pts['dd_time_pts']
-        dddT = self.time_pts['ddd_time_pts']
-        ddddT = self.time_pts['dddd_time_pts']
+        T = self.time_pts['time_pts'].cpu().numpy()
+        dT = self.time_pts['d_time_pts'].cpu().numpy()
+        ddT = self.time_pts['dd_time_pts'].cpu().numpy()
+        dddT = self.time_pts['ddd_time_pts'].cpu().numpy()
+        ddddT = self.time_pts['dddd_time_pts'].cpu().numpy()
 
         full_traj = []
-        for coeff in self.coeffs:
-            pos = (coeff @ T).T
-            vel = (coeff @ dT).T
-            acc = (coeff @ ddT).T
-            jerk = (coeff @ dddT).T
+        for i, coeff in enumerate(self.coeffs):
+            if i < len(self.coeffs) - 1:
+                pos = (coeff @ T[:, :-1]).T
+                vel = (coeff @ dT[:, :-1]).T
+                acc = (coeff @ ddT[:, :-1]).T
+                jerk = (coeff @ dddT[:, :-1]).T
+            else:
+                pos = (coeff @ T).T
+                vel = (coeff @ dT).T
+                acc = (coeff @ ddT).T
+                jerk = (coeff @ dddT).T
+
             sub_traj = np.concatenate([pos, vel, acc, jerk], axis=-1)
             full_traj.append(sub_traj)
 
