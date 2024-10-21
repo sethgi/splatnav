@@ -8,3 +8,5 @@ trajs
 *.jpg
 *.jpeg
 *.ply
+__pycache__/
+*.pyc

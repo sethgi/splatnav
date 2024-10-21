@@ -307,7 +307,10 @@ class Corridor():
             bs = torch.stack(bs)
             ps_star = torch.stack(ps_star, dim=0)
 
-        
+        # Now we need to transform the hyperplanes back to the world frame
+        As = As * (1. / S)[None, :] @ R.T    # M x 3
+        bs = bs + torch.sum(midpoint[None, :] * As, dim=-1)    # M
+
         return As, bs, ps_star
     
 
@@ -401,6 +404,13 @@ class Corridor():
 
 def rotation_matrix_from_vectors(vec1, vec2):
     # Reference: https://stackoverflow.com/questions/45142959/calculate-rotation-matrix-to-align-two-vectors-in-3d-space
+    dim = vec1.shape[0]
+
+    if dim == 2:
+        # 2D rotation matrix
+        theta = torch.atan2(vec2[1], vec2[0]) - torch.atan2(vec1[1], vec1[0])
+        rotation_matrix = torch.tensor([[torch.cos(theta), -torch.sin(theta)], [torch.sin(theta), torch.cos(theta)]], device=vec1.device)
+        return rotation_matrix
     a, b = (vec1 / torch.norm(vec1)).reshape(3), (vec2 / torch.norm(vec2)).reshape(3)
     v = torch.cross(a, b)
     c = torch.dot(a, b)
@@ -411,6 +421,7 @@ def rotation_matrix_from_vectors(vec1, vec2):
     
     kmat = torch.tensor([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]], device=vec1.device)
     rotation_matrix = torch.eye(3, device=vec1.device) + kmat + kmat.mm(kmat) * ((1 - c) / (s ** 2))
+    
     return rotation_matrix
 
 

@@ -3,6 +3,26 @@ import scipy
 import clarabel
 from scipy import sparse
 from scipy.optimize import linprog
+import torch
+
+def compute_path_in_polytope(A, b, path):
+    # Path is a list of points. Sequential points indicate line segments.
+    # We check each point in path to see if it satisfies Ax <= b. The first point that does not satisfy
+    # the check is the point where the path exits the polytope.
+    # A: (n_constraints, n_dim)
+    # b: (n_constraints,)
+
+    # Outputs the last index of path that satisfies the polytope
+
+    criterion = torch.all( (A @ path.T - b[:, None]) <= 0., dim=0 )
+    idx = torch.arange(len(path))[~criterion]
+
+    if len(idx) == 0:
+        # All points in path satisfy polytope
+        return None
+    else:
+        first_exit = idx[0]
+        return first_exit - 1
 
 def h_rep_minimal(A, b, pt):
     halfspaces = np.concatenate([A, -b[..., None]], axis=-1)

@@ -1,72 +1,47 @@
 import torch
-# import osqp
 import numpy as np
 from scipy import sparse
 import clarabel
 import time
 
-from ellipsoids.polytopes_utils import h_rep_minimal, find_interior
+from polytopes.polytopes_utils import h_rep_minimal, find_interior, compute_path_in_polytope
+from initialization.grid_utils import GSplatVoxel
+from polytopes.collision_set import GSplatCollisionSet
 
-class CBF():
-    def __init__(self, gsplat, dynamics, alpha, beta, radius, distance_type=None):
+class SplatNav():
+    def __init__(self, gsplat, robot_config):
         # gsplat: GSplat object
-        # dynamics: function that returns f, g given x
-        # alpha: class K extended function
 
         self.gsplat = gsplat
-        self.dynamics = dynamics
-        self.alpha = lambda x: alpha * x
-        self.beta = lambda x: beta * x
-        self.rel_deg = dynamics.rel_deg
+
         self.radius = radius
+        collision_set = GSplatCollisionSet(gsplat, vmax, amax, radius, device)
 
-        self.alpha_constant = alpha
-        self.beta_constant = beta
+        tnow = time.time()
+        torch.cuda.synchronize()
+        gsplat_voxel = GSplatVoxel(gsplat, lower_bound=lower_bound, upper_bound=upper_bound, resolution=resolution, radius=radius, device=device)
+        torch.cuda.synchronize()
+        print('Time to create GSplatVoxel:', time.time() - tnow)
 
-        self.distance_type = distance_type
+        # Save the mesh
+        # gsplat_voxel.create_mesh(save_path=save_path)
+        # gsplat.save_mesh(scene_name + '_gsplat.obj')
 
-        # Create an OSQP object
-        # self.prob = osqp.OSQP()
+        tnow = time.time()
+        path = gsplat_voxel.create_path(x0, xf)
+        print('Time to create path:', time.time() - tnow)
 
-        self.times_solved = 0
-        self.solver_success = True
+        # Visualize bounding boxes
+        output = collision_set.compute_set(torch.tensor(path, device=device), save_path=scene_name)
 
+        #TODO: Record times
         self.times_cbf = []
         self.times_qp = []
         self.times_prune = []
 
-        print(distance_type)
-
-    # TODO: This function assumes relative degree 2, we should make it account for single-integrator dynamics too.
     def get_QP_matrices(self, x, u_des, minimal=True):
         # Computes the A and b matrices for the QP A u <= b
 
-        tnow = time.time()
-        h, grad_h, hes_h, info = self.gsplat.query_distance(x[..., :3], radius=self.radius, distance_type=self.distance_type) # can pass in an optional argument for a radius
-        # print('Time to query distance:', time.time() - tnow)
-        self.times_cbf.append(time.time() - tnow)
-
-        h = h.unsqueeze(-1)
-        grad_h = torch.cat((grad_h, torch.zeros(h.shape[0], 3).to(grad_h.device)), dim=-1)
-        # add zeros to the right of hes_h
-        hes_h = torch.cat((hes_h, torch.zeros(h.shape[0], 3, 3).to(hes_h.device)), dim=2)
-        hes_h = torch.cat((hes_h, torch.zeros(h.shape[0], 3, 6).to(hes_h.device)), dim=1)
-
-        f, g, df = self.dynamics.system(x)
-
-        f = f.unsqueeze(-1)
-       
-        # Extended barrier function
-        lfh = torch.matmul(grad_h, f).squeeze()
-
-        lflfh = torch.matmul(f.T, torch.matmul(hes_h, f)).squeeze() + torch.matmul(grad_h, torch.matmul(df, f)).squeeze()
-        lglfh = torch.matmul(g.T, torch.matmul(hes_h, f)).squeeze() + torch.matmul(grad_h, torch.matmul(df, g)).squeeze()
-
-        # our full constraint is
-        # lflfh + lglfh * u + alpha(lfh) + beta(lfh + alpha(h)) <= 0
-        l = -lflfh - self.alpha(lfh) - self.beta(lfh + self.alpha(h.squeeze()))
-
-        A = lglfh[None]  # 1 x 6
 
         P = np.eye(3)
         q = -1*u_des.cpu().numpy()
