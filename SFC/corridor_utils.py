@@ -4,26 +4,55 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import copy
+import time
+
+from initialization.grid_utils import GSplatVoxel
+from polytopes.collision_set import GSplatCollisionSet
 
 # All functions are adapted and named accordingly to the "Planning Dynamically Feasible Trajectories for Quadrotors Using Safe Flight Corridors in 3-D Complex Environments"
 #  paper (https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=7839930). These functions have been adapted into Pytorch.
 class Corridor():
-    def __init__(self, radius_robot, device='cuda', rs=None, vmax=None, amax=None) -> None:
+    def __init__(self, gsplat, robot_config, env_config, spline_planner, device) -> None:
         # Rs is the radius around the path, determined by the max velocity and acceleration of the robot.
-        if rs is None:
-            assert vmax is not None and amax is not None
-            self.rs = vmax**2 / (2*amax)
-        else:
-            self.rs = rs
 
-        self.rad_robot = radius_robot
+
+        self.gsplat = gsplat
+        self.device = device
+        self.env_config = env_config
+        self.spline_planner = spline_planner
+         # Robot configuration
+        self.radius = robot_config['radius']
+        self.vmax = robot_config['vmax']
+        self.amax = robot_config['amax']
+        self.collision_set = GSplatCollisionSet(self.gsplat, self.vmax, self.amax, self.radius, self.device)
+        
+        
+        # Environment configuration (specifically voxel)
+        self.lower_bound = env_config['lower_bound']
+        self.upper_bound = env_config['upper_bound']
+        self.resolution = env_config['resolution']
+
+        tnow = time.time()
+        torch.cuda.synchronize()
+        self.gsplat_voxel = GSplatVoxel(self.gsplat, lower_bound=self.lower_bound, upper_bound=self.upper_bound, resolution=self.resolution, radius=self.radius, device=device)
+        torch.cuda.synchronize()
+        print('Time to create GSplatVoxel:', time.time() - tnow)
+
+        
+        self.rs = robot_config['vmax']**2 / (2 * robot_config['amax'])
+
+
         self.up = torch.tensor([[0, 0, 1]], dtype=torch.float32, device=device)
         
         # init bounding box constriants values as empty
         self.box_As = torch.tensor([])
         self.box_bs = torch.tensor([])
 
-        
+
+        # Record times
+        self.times_collision = []
+        self.times_ellipse = []
+        self.times_polytope = []        
 
     def bounding_box_and_points(self, path, point_cloud):
         # path: N+1 x 3
@@ -122,7 +151,6 @@ class Corridor():
         # So E = R @ S @ S.T @ R.T (this is flipped from the paper, but follows the Gaussian Splatting decomposition). 
         # For convenience, R is a matrix, but S is a vector that parametrized the diagonal scaling matrix.
  
-        print('Building Ellipsoid ')
         # find the ellipsoid center       
         p0, p1 = line_segment[0], line_segment[1]
         d = (p0 + p1) / 2
@@ -155,8 +183,6 @@ class Corridor():
             closest_id = torch.argmin(dists[inside])
             scaled_points_inside = scaled_points[inside]
             closest_point = scaled_points_inside[closest_id]
-            print(f'Closest Point XY: {closest_point}')
-
             # find scale factor for y-z axes
             distance_yz = closest_point[1]**2 + closest_point[2]**2
             denominator = 1.0 - closest_point[0]**2
@@ -175,7 +201,7 @@ class Corridor():
         if closest_point is not None: 
             p_star_xy = closest_point
             # remove p* from list of points
-            scaled_points = scaled_points[np.linalg.norm(scaled_points - p_star_xy[None, :], axis=1) > 0]
+            scaled_points = scaled_points[torch.norm(scaled_points - p_star_xy[None, :], dim=1) > 0]
 
             # project p* onto yz plane
             p_yz = p_star_xy - p_star_xy[0] * torch.tensor([1, 0, 0], dtype=torch.float32, device=p_star_xy.device)
@@ -199,7 +225,6 @@ class Corridor():
             p_star_xy = ((p_star_xy * S_orig) @ R) + d
 
         else:  # no collision found
-            print('No Initial P*')
             # set p_star on ellipsoid boundary
             p_star_xy = torch.tensor([0, 0, 0], dtype=torch.float32, device=d.device)
             R_2_1 = torch.eye(3, dtype=torch.float32, device=d.device)
@@ -220,7 +245,6 @@ class Corridor():
             closest_id = torch.argmin(dists[inside])
             scaled_points_inside = scaled_points[inside]
             closest_point = scaled_points_inside[closest_id]
-            print(f'Closest Point Z: {closest_point}')
 
             # find scale factor for z-axis
             distance_z = closest_point[2]**2
@@ -239,7 +263,6 @@ class Corridor():
             # find p* in world frame
             p_star_z = ((p_star_z * S_temp * S_orig) @ R_2_1.T @ R) + d
         else:  # no collision found
-            print('No Second P*')
             # set p_star on ellipsoid boundary
             p_star_z = torch.tensor([0, 0, 0], dtype=torch.float32, device=d.device)
         
@@ -292,11 +315,17 @@ class Corridor():
             ps_star.append(p_star)
 
             # We now find and delete all points that are on or outside this hyperplane
-            mask = torch.sum(scaled_points * p_star, dim=-1) < min_val**2 - 1e-3  # M_i, true if on the right side of the hyperplane
+            mask = torch.sum(scaled_points * p_star, dim=-1) < min_val**2 - 1e-2  # M_i, true if on the right side of the hyperplane
             scaled_points = scaled_points[mask] 
 
         # If we only performed one iteration, we can just return the hyperplane
-        if len(As) == 1:
+
+        if len(As) == 0:
+            box_As = self.box_As
+            box_bs = self.box_bs
+            return self.box_As, self.box_bs, None
+
+        elif len(As) == 1:
             As = As[0][None]        # 1 x 3
             bs = bs[0].reshape(1,)    # 1
             ps_star = ps_star[0].reshape(1, -1)
@@ -307,9 +336,13 @@ class Corridor():
             bs = torch.stack(bs)
             ps_star = torch.stack(ps_star, dim=0)
 
+
         # Now we need to transform the hyperplanes back to the world frame
         As = As * (1. / S)[None, :] @ R.T    # M x 3
         bs = bs + torch.sum(midpoint[None, :] * As, dim=-1)    # M
+
+        As = torch.cat([As, self.box_As], dim=0)
+        bs = torch.cat([bs, self.box_bs], dim=0)
 
         return As, bs, ps_star
     
@@ -322,7 +355,7 @@ class Corridor():
         bs = torch.cat([bs, box_bs])
 
         # find norm of each plane
-        bs_new = bs - self.rad_robot
+        bs_new = bs - self.radius
 
         return bs_new
 
@@ -346,7 +379,7 @@ class Corridor():
         print(f'Signed Distance to Point 2: {signed_distance_to_point2}')
         # As a sanity check, we should check if these signed distances are all negative (meaning the hyperplane is on the correct side).
         # TODO:
-        hyperplane_ok = torch.logical_and( (signed_distance_to_point1 < -self.rad_robot),  (signed_distance_to_point2 < -self.rad_robot) )
+        hyperplane_ok = torch.logical_and( (signed_distance_to_point1 < -self.radius),  (signed_distance_to_point2 < -self.radius) )
 
         hyperplanes_to_adjust = As[~hyperplane_ok]
         pivots_to_adjust = pivots[~hyperplane_ok]
@@ -355,7 +388,7 @@ class Corridor():
         # To do this, we basically move the pivot point by the robot radius in the direction opposite of the normal.
         hyperplane_ok_A = As[hyperplane_ok]
 
-        deflated_pivots = pivots[hyperplane_ok] - self.rad_robot * hyperplane_ok_A / torch.linalg.norm(hyperplane_ok_A, dim=-1, keepdim=True)    # M x 3
+        deflated_pivots = pivots[hyperplane_ok] - self.radius * hyperplane_ok_A / torch.linalg.norm(hyperplane_ok_A, dim=-1, keepdim=True)    # M x 3
 
         hyperplane_ok_b = torch.sum( hyperplane_ok_A * deflated_pivots, dim=-1)    # M
 
@@ -364,8 +397,8 @@ class Corridor():
         # Note that the outgoing hyperplane is already pushed some R away from the pivot, and so is ready to go
         # in terms of using it for point-based planning.
         if hyperplanes_to_adjust.shape[0] > 0:  
-            adjusted_A1, adjusted_b1, objs1 = find_closest_hyperplane(pivots_to_adjust, hyperplanes_to_adjust, point1, self.rad_robot)        # M x 2 x 3, M x 2
-            adjusted_A2, adjusted_b2, objs2 = find_closest_hyperplane(pivots_to_adjust, hyperplanes_to_adjust, point2, self.rad_robot)
+            adjusted_A1, adjusted_b1, objs1 = find_closest_hyperplane(pivots_to_adjust, hyperplanes_to_adjust, point1, self.radius)        # M x 2 x 3, M x 2
+            adjusted_A2, adjusted_b2, objs2 = find_closest_hyperplane(pivots_to_adjust, hyperplanes_to_adjust, point2, self.radius)
 
         if adjusted_A1 is None or adjusted_A2 is None:
             return None, None
@@ -400,6 +433,82 @@ class Corridor():
         bs = torch.cat([hyperplane_ok_b, adjusted_b], dim=0)
 
         return As, bs
+
+
+    def generate_path(self, x0, xf):
+
+        # Part 1: Computes the path seed using A*
+        tnow = time.time()
+        path = self.gsplat_voxel.create_path(x0, xf)
+        torch.cuda.synchronize()
+        time_astar = time.time() - tnow
+
+        times_collision_set = 0
+        times_ellipsoid = 0
+        times_polytope = 0
+        times_shrink = 0
+
+        polytopes = []      # List of polytopes (A, b)
+        segments = torch.tensor(np.stack([path[:-1], path[1:]], axis=1), device=self.device)
+
+        for it, segment in enumerate(segments):
+            # If this is the first line segment, we always create a polytope. Or subsequently, we only instantiate a polytope if the line segment
+
+            # Part 2: Computes the collision set
+            tnow = time.time()
+            output = self.collision_set.compute_set_one_step(segment)
+            torch.cuda.synchronize()
+            point_cloud = output['means']
+            self.box_As = output['A_bb']
+            self.box_bs = output['b_bb_shrunk']
+            times_collision_set += time.time() - tnow
+
+            # Part 3: Compute the ellipsoid
+            tnow = time.time()
+            ellipsoid, d, p_stars = self.find_ellipsoid(segment, point_cloud)
+            torch.cuda.synchronize()
+            times_ellipsoid += time.time() - tnow
+
+            # Part 4: Compute the polytope
+            tnow = time.time()
+            As, bs, ps_star = self.find_polyhedron(point_cloud, d, ellipsoid)
+            torch.cuda.synchronize()
+            times_collision_set += time.time() - tnow
+            
+            # Part 5: Shrink the polytope
+            bs_shrunk = bs - self.radius * torch.norm(As, dim=-1)
+
+
+            # save polytope
+            polytope = (As, bs)
+            
+            polytopes.append(polytope)
+
+        # Step 6: Perform Bezier spline optimization
+        tnow = time.time()
+        traj, feasible = self.spline_planner.optimize_b_spline(polytopes, x0, xf)
+        if not feasible:
+            traj = torch.stack([x0, xf], dim=0)
+        torch.cuda.synchronize()
+        times_opt = time.time() - tnow
+
+        # save outputs 
+        traj_data = {
+            'path': path.tolist(),
+            'polytopes': [torch.cat([polytope[0], polytope[1].unsqueeze(-1)], dim=-1).tolist() for polytope in polytopes],
+            'num_polytopes': len(polytopes),
+            'traj': traj.tolist(),
+            'times_astar': time_astar,
+            'times_collision_set': times_collision_set,
+            'times_ellipsoid': times_ellipsoid,
+            'times_polytope': times_polytope,
+            'times_opt': times_opt,
+            'feasible': feasible
+        }
+
+        return traj_data
+
+
 
 
 def rotation_matrix_from_vectors(vec1, vec2):

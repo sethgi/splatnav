@@ -24,6 +24,17 @@ def compute_path_in_polytope(A, b, path):
         first_exit = idx[0]
         return first_exit - 1
 
+def compute_segment_in_polytope(A, b, segment):
+    # Segment is a list of two points. We check if the line segment between the two points
+    # satisfies Ax <= b. If it does, we return True. If not, we return False.
+    # A: (n_constraints, n_dim)
+    # b: (n_constraints,)
+
+    # Outputs whether the segment satisfies the polytope
+    criterion = torch.all( (A @ segment.T - b[:, None]) <= 0.)
+
+    return criterion
+
 def h_rep_minimal(A, b, pt):
     halfspaces = np.concatenate([A, -b[..., None]], axis=-1)
     hs = scipy.spatial.HalfspaceIntersection(halfspaces, pt, incremental=False, qhull_options=None)

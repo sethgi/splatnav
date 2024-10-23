@@ -1,6 +1,7 @@
 data
 outputs
 blender_envs
+configs
 trajs
 *.obj
 *.ply

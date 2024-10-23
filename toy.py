@@ -17,39 +17,39 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # We will initialize Gaussians in a C shape with the robot starting at the center and moving outward.
 
 # Parameters
-n_gaussians = 10        # per side
-n_dim = 2
+n_gaussians = 20        # per side
+n_dim = 3
 t = np.linspace(0, 1, n_gaussians)
 
 # First side
 quats1 = np.random.rand(n_gaussians, 4)
-quats1[:, :2] = 0.      # Only rotates about z-axis
+# quats1[:, :2] = 0.      # Only rotates about z-axis
 quats1 = quats1 / np.linalg.norm(quats1, axis=1)[:, None]
 rots1 = Rotation.from_quat(quats1).as_matrix()
 scales1 = np.random.rand(n_gaussians, n_dim) * 0.1 + 0.05
 
-delta_x = np.array([1., 0.])
-means1 = np.array([-0.5, 0.5])[None, :] + delta_x[None, :] * t[:, None]
+delta_x = np.array([1., 0., 0.])
+means1 = np.array([-0.5, 0.5, 0.])[None, :] + delta_x[None, :] * t[:, None]
 
 # second side
 quats2 = np.random.rand(n_gaussians, 4)
-quats2[:, :2] = 0.      # Only rotates about z-axis
+# quats2[:, :2] = 0.      # Only rotates about z-axis
 quats2 = quats2 / np.linalg.norm(quats2, axis=1)[:, None]
 rots2 = Rotation.from_quat(quats2).as_matrix()
 scales2 = np.random.rand(n_gaussians, n_dim) * 0.1 + 0.05
 
-delta_x = np.array([0., 1.])
-means2 = np.array([-0.5, -0.5])[None, :] + delta_x[None, :] * t[:, None]
+delta_x = np.array([0., 1., 0.])
+means2 = np.array([-0.5, -0.5, 0.])[None, :] + delta_x[None, :] * t[:, None]
 
 # third side
 quats3 = np.random.rand(n_gaussians, 4)
-quats3[:, :2] = 0.      # Only rotates about z-axis
+# quats3[:, :2] = 0.      # Only rotates about z-axis
 quats3 = quats3 / np.linalg.norm(quats3, axis=1)[:, None]
 rots3 = Rotation.from_quat(quats3).as_matrix()
 scales3 = np.random.rand(n_gaussians, n_dim) * 0.1 + 0.05
 
-delta_x = np.array([-1., 0.])
-means3 = np.array([0.5, -0.5])[None, :] + delta_x[None, :] * t[:, None]
+delta_x = np.array([-1., 0., 0.])
+means3 = np.array([0.5, -0.5, 0.])[None, :] + delta_x[None, :] * t[:, None]
 
 quats = np.concatenate([quats1, quats2, quats3], axis=0)
 rots = np.concatenate([rots1, rots2, rots3], axis=0)[..., :n_dim, :n_dim]
@@ -63,18 +63,17 @@ means = torch.tensor(means, dtype=torch.float32, device=device)
 
 #%%
 
-# delta_x = torch.tensor([0.75, 0.0], device=device)
-# x0 = torch.tensor([-0.25, 0.], device=device)
+delta_x = torch.tensor([0.75, 0.0, 0.], device=device)
+x0 = torch.tensor([-0.25, 0., 0.], device=device)
 
 # delta_x = 1.5*torch.tensor([1., 1.], device=device)
 # x0 = torch.tensor([-0.75, -0.75], device=device)
 
-x0 = torch.tensor([0., 0.], device=device)
-delta_x = 0.25*torch.tensor([1., 1.], device=device)
-
+# x0 = torch.tensor([0., 0.], device=device)
+# delta_x = 0.25*torch.tensor([1., 1.], device=device)
 
 # robot parameters
-radius = 0.25
+radius = 0.15
 
 R_B = np.random.rand(4)
 R_B /= np.linalg.norm(R_B)
@@ -84,14 +83,26 @@ S_B = torch.rand(n_dim, device=device) * 0.1 + 0.05
 
 torch.cuda.synchronize()
 tnow = time.time()
-# output = compute_intersection_linear_motion(x0, delta_x, rots, scales, means, 
-#                                    R_B=None, S_B=radius, collision_type='sphere', 
-#                                    mode='bisection', N=10)
 output = compute_intersection_linear_motion(x0, delta_x, rots, scales, means, 
-                                   R_B=R_B, S_B=S_B, collision_type='ellipsoid', 
+                                   R_B=None, S_B=radius, collision_type='sphere', 
                                    mode='bisection', N=10)
+# output = compute_intersection_linear_motion(x0, delta_x, rots, scales, means, 
+#                                    R_B=R_B, S_B=S_B, collision_type='ellipsoid', 
+#                                    mode='bisection', N=10)
 torch.cuda.synchronize()
 print('Time to compute intersections:', time.time() - tnow)
+
+segment = torch.stack([x0, x0 + delta_x], dim=0)
+check1 = torch.einsum('bij, bjk, bkl->bil', (segment[0][None] - output['mu_A'])[..., None, :], output['Q_opt'], 
+                (segment[0][None] - output['mu_A'])[..., None] ).squeeze()
+check2 = torch.einsum('bij, bjk, bkl->bil', (segment[1][None] - output['mu_A'])[..., None, :], output['Q_opt'], 
+        (segment[1][None] - output['mu_A'])[..., None] ).squeeze()
+
+try:
+    assert torch.all( check1 - output['K_opt'] >= -1e-4)
+    assert torch.all( check2 - output['K_opt'] >= -1e-4)
+except:
+    print(f"Check failed", check1, check2, output['K_opt'])
 
 torch.cuda.synchronize()
 tnow = time.time()
@@ -108,9 +119,9 @@ robot_plot_kwargs = {
 }
 t = np.linspace(0, 1, 100)
 robot_line = x0[None, :] + torch.tensor(t[:, None], device=device) * delta_x[None, :]
-# Sigma_B = torch.eye(n_dim) * (radius**2)
-Sigma_B = R_B * S_B[None, :]
-Sigma_B = Sigma_B @ Sigma_B.T
+Sigma_B = torch.eye(n_dim) * (radius**2)
+# Sigma_B = R_B * S_B[None, :]
+# Sigma_B = Sigma_B @ Sigma_B.T
 
 # plot robot body along the line
 for pt in robot_line:
@@ -137,11 +148,16 @@ for (rot, scale, mean, not_intersect) in zip(rots, scales, means, not_intersects
     plot_ellipse(mean, Sigma, 1., ax1, **ellipsoid_plot_kwargs)
 
 # plot polytope
-poly = polytope.Polytope(A.cpu().numpy(), b.cpu().numpy())
+poly = polytope.Polytope(A[:,:2].cpu().numpy(), b.cpu().numpy())
 plot_polytope(poly, ax1)
 ax1.set_title('Splat-Nav')
 # plot the pivot points
 ax1.scatter(pts[:, 0].cpu().numpy(), pts[:, 1].cpu().numpy(), color='black', s=10)
+ax1.scatter(pts[:, 0].cpu().numpy(), pts[:, 1].cpu().numpy(), color='black', s=10)
+
+# plot config
+ax1.scatter(x0[0].cpu().numpy(), x0[1].cpu().numpy(), color='red', s=10)
+ax1.scatter(x0[0].cpu().numpy() + delta_x[0].cpu().numpy(), x0[1].cpu().numpy() + delta_x[1].cpu().numpy(), color='red', s=10)
 
 ax1.set_xlim(-1, 3)
 ax1.set_ylim(-2, 2)
@@ -150,7 +166,14 @@ ax1.set_ylim(-2, 2)
 # init corridor
 vmax = 0.1
 amax = 0.01
-cor = Corridor(radius_robot=radius, vmax=vmax, amax=amax)
+# Robot configuration
+robot_config = {
+    'radius': radius,
+    'vmax': vmax,
+    'amax': amax,
+}
+
+#cor = Corridor(radius_robot=radius, vmax=vmax, amax=amax)
 
 point_cloud = torch.column_stack((means, torch.zeros(means.shape[0], device=device).view(-1,1)))
 
@@ -163,13 +186,11 @@ ellipsoid, d, p_stars = cor.find_ellipsoid(line_segment, point_cloud)
 As, bs, ps_star = cor.find_polyhedron(point_cloud, d, ellipsoid)
 
 
-
 #%% 
 #fig, ax = plt.subplots(1, figsize=(10, 10))
 
 for pt in robot_line:
     plot_ellipse(pt, Sigma_B, 1., ax2, **robot_plot_kwargs)
-
 
 for mu in point_cloud:    
     if not_intersect:
@@ -229,4 +250,3 @@ ax3.set_xlim(-1, 3)
 ax3.set_ylim(-2, 2)
 
 plt.show()
-# %%
