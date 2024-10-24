@@ -16,7 +16,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 ### ----------------- Possible Distance Types ----------------- ###
 
 for scene_name in ['statues', 'old_union', 'flight']: #['stonehenge', 'statues', 'flight', 'old_union']:
-    for method in ['sfc']:
+    for method in ['splatplan']:
 
         # NOTE: POPULATE THE UPPER AND LOWER BOUNDS FOR OTHER SCENES!!!
         if scene_name == 'old_union':
@@ -140,6 +140,8 @@ for scene_name in ['statues', 'old_union', 'flight']: #['stonehenge', 'statues',
             polytope_vols = []
             polytope_radii = []
 
+            polytope_margin = []
+
             for poly in polytopes:
 
                 poly = np.array(poly)
@@ -150,10 +152,18 @@ for scene_name in ['statues', 'old_union', 'flight']: #['stonehenge', 'statues',
                 polytope_vols.append(p.volume)
                 polytope_radii.append(np.linalg.norm(p.chebR))
 
+                vertices = torch.tensor(polytope.extreme(p), device=device, dtype=torch.float32)
+
+                for vertex in vertices:
+                    h, grad_h, hess_h, info = gsplat.query_distance(vertex, radius=radius, distance_type='ball-to-ellipsoid')
+                    # record min value of h
+                    polytope_margin.append(torch.min(h).item())
+
             data['safety_margin'] = safety_margin
             data['path_length'] = path_length
             data['polytope_vols'] = polytope_vols
             data['polytope_radii'] = polytope_radii
+            data['polytope_margin'] = polytope_margin
 
             total_data_processed.append(data)
 

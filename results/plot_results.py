@@ -48,10 +48,13 @@ for k, scene_name in enumerate(scene_names):
  
             success = []
             safety = []
+            polytope_safety = []
             times = []
             polytope_vols = []
             polytope_radii = []
             path_length = []
+
+            num_facets = []
 
             # Per trajectory
             for i, data in enumerate(datas):
@@ -74,6 +77,7 @@ for k, scene_name in enumerate(scene_names):
 
                 # record the min safety margin
                 safety.append(np.array(data['safety_margin']).min())
+                polytope_safety.append(np.array(data['polytope_margin']).min())
                 path_length.append(data['path_length'])
 
                 # record the polytope stats (min/max/mean/std)
@@ -83,12 +87,19 @@ for k, scene_name in enumerate(scene_names):
                 polytope_vols.append([polytope_vols_entry.min(), polytope_vols_entry.max(), polytope_vols_entry.mean(), polytope_vols_entry.std()])
                 polytope_radii.append([polytope_radii_entry.min(), polytope_radii_entry.max(), polytope_radii_entry.mean(), polytope_radii_entry.std()])
 
+                polytope_length = np.array([len(np.array(poly)) for poly in data['polytopes']]).mean()
+
+                num_facets.append(polytope_length)
+
             success = np.array(success)
             safety = np.array(safety)
+            polytope_safety = np.array(polytope_safety)
             times = np.array(times)
             polytope_vols = np.array(polytope_vols)
             polytope_radii = np.array(polytope_radii)
             path_length = np.array(path_length)
+
+            print(f'{scene_name}_{method}', np.array(num_facets).mean())
 
         elif method == 'splatplan':
             col = '#4285F4'
@@ -96,10 +107,13 @@ for k, scene_name in enumerate(scene_names):
 
             success = []
             safety = []
+            polytope_safety = []
             times = []
             polytope_vols = []
             polytope_radii = []
             path_length = []
+
+            num_facets = []
 
             # Per trajectory
             for i, data in enumerate(datas):
@@ -121,6 +135,7 @@ for k, scene_name in enumerate(scene_names):
                 
                 # record the min safety margin
                 safety.append(np.array(data['safety_margin']).min())
+                polytope_safety.append(np.array(data['polytope_margin']).min())
                 path_length.append(data['path_length'])
 
                 # record the polytope stats (min/max/mean/std)
@@ -129,13 +144,20 @@ for k, scene_name in enumerate(scene_names):
 
                 polytope_vols.append([polytope_vols_entry.min(), polytope_vols_entry.max(), polytope_vols_entry.mean(), polytope_vols_entry.std()])
                 polytope_radii.append([polytope_radii_entry.min(), polytope_radii_entry.max(), polytope_radii_entry.mean(), polytope_radii_entry.std()])
+                
+                polytope_length = np.array([len(np.array(poly)) for poly in data['polytopes']]).mean()
+
+                num_facets.append(polytope_length)
 
             success = np.array(success)
             safety = np.array(safety)
+            polytope_safety = np.array(polytope_safety)
             times = np.array(times)
             polytope_vols = np.array(polytope_vols)
             polytope_radii = np.array(polytope_radii)
             path_length = np.array(path_length)
+
+            print(f'{scene_name}_{method}', np.array(num_facets).mean())
 
         # elif method == 'rrt':
         #     col = '#FBBc05'
@@ -160,12 +182,20 @@ for k, scene_name in enumerate(scene_names):
                     linestyle='-', joinstyle='round', rasterized=True)
 
         # Safety Margin
-        errors = np.abs(safety.mean().reshape(-1, 1) - np.array([safety.min(), safety.max()]).reshape(-1, 1))
+        # For trajectory points
+        # errors = np.abs(safety.mean().reshape(-1, 1) - np.array([safety.min(), safety.max()]).reshape(-1, 1))
 
-        ax[0, 1].errorbar(k + 0.75*j/len(methods) + 0.25/2, safety.mean().reshape(-1, 1), yerr=errors, color=adjust_lightness(col, 0.5), markeredgewidth=5, capsize=15, elinewidth=5, alpha=0.5)
-        ax[0, 1].scatter( np.repeat((k + 0.75*j/len(methods) + 0.25/2), len(safety)), safety, s=250, color=col, alpha=0.04)
-        ax[0, 1].scatter(k +  + 0.75*j/len(methods) + 0.25/2 - 0.13, safety.mean(), s=200, color=col, alpha=1, marker='>')
+        # ax[0, 1].errorbar(k + 0.75*j/len(methods) + 0.25/2, safety.mean().reshape(-1, 1), yerr=errors, color=adjust_lightness(col, 0.5), markeredgewidth=5, capsize=15, elinewidth=5, alpha=0.5)
+        # ax[0, 1].scatter( np.repeat((k + 0.75*j/len(methods) + 0.25/2), len(safety)), safety, s=250, color=col, alpha=0.04)
+        # ax[0, 1].scatter(k +  + 0.75*j/len(methods) + 0.25/2 - 0.13, safety.mean(), s=200, color=col, alpha=1, marker='>')
             
+        # For polytope vertices
+        errors = np.abs(polytope_safety.mean().reshape(-1, 1) - np.array([polytope_safety.min(), polytope_safety.max()]).reshape(-1, 1))
+
+        ax[0, 1].errorbar(k + 0.75*j/len(methods) + 0.25/2, polytope_safety.mean().reshape(-1, 1), yerr=errors, color=adjust_lightness(col, 0.5), markeredgewidth=5, capsize=15, elinewidth=5, alpha=0.5)
+        ax[0, 1].scatter( np.repeat((k + 0.75*j/len(methods) + 0.25/2), len(polytope_safety)), polytope_safety, s=250, color=col, alpha=0.04)
+        ax[0, 1].scatter(k +  + 0.75*j/len(methods) + 0.25/2 - 0.13, polytope_safety.mean(), s=200, color=col, alpha=1, marker='>')
+
         # Polytope Volume
         errors = np.abs(polytope_vols[:, 2].mean().reshape(-1, 1) - np.array([polytope_vols[:, 0].min(), polytope_vols[:, 1].max()]).reshape(-1, 1))
 
@@ -208,7 +238,7 @@ ax[0, 1].grid(axis='y', linewidth=2, color='k', linestyle='--', alpha=0.5, zorde
 ax[0, 1].set_axisbelow(True)
 for location in ['left', 'right', 'top', 'bottom']:
     ax[0, 1].spines[location].set_linewidth(4)
-ax[0, 1].set_ylim(-0.005, 0.005)
+ax[0, 1].set_ylim(-0.0015, 0.00015)
 
 # POLYTOPE VOLUME
 ax[1, 0].set_title(r'Polytope Volume $\uparrow$', fontsize=25, fontweight='bold')
