@@ -17,7 +17,6 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # Methods for the simulation
 n = 100         # number of different configurations
 n_steps = 10   # number of time discretizations
-n_t = 500       # number of time steps. NOTE:This is only used for myopic methods like single-step splatplan!!!
 
 # Creates a circle for the configuration
 t = np.linspace(0, 2*np.pi, n)
@@ -27,6 +26,9 @@ t_z = 10*np.linspace(0, 2*np.pi, n)
 use_saved = False
 config_path_base = 'configs'
 os.makedirs(config_path_base, exist_ok=True)
+
+# Using sparse representation?
+sparse = True
 
 ### ----------------- Possible Methods ----------------- ###
 # method = 'splatplan'
@@ -43,7 +45,10 @@ for scene_name in ['flight', 'statues', 'old_union']: #['stonehenge', 'statues',
             radius_config = 1.35/2  # radius of xy circle
             mean_config = np.array([0.14, 0.23, -0.15]) # mean of the circle
 
-            path_to_gsplat = Path('outputs/old_union2/splatfacto/2024-09-02_151414/config.yml') # points to where the gsplat params are stored
+            if sparse:
+                path_to_gsplat = Path('outputs/old_union2/sparse-splat/2024-10-25_113753/config.yml')
+            else:
+                path_to_gsplat = Path('outputs/old_union2/splatfacto/2024-09-02_151414/config.yml') # points to where the gsplat params are stored
 
             radius = 0.01       # radius of robot
             amax = 0.1
@@ -59,7 +64,10 @@ for scene_name in ['flight', 'statues', 'old_union']: #['stonehenge', 'statues',
             radius_config = 0.784/2
             mean_config = np.array([-0.08, -0.03, 0.05])
 
-            path_to_gsplat = Path('outputs/stonehenge/splatfacto/2024-09-11_100724/config.yml')
+            if sparse:
+                path_to_gsplat = Path('outputs/stonehenge/sparse-splat/2024-10-25_120323/config.yml')
+            else:
+                path_to_gsplat = Path('outputs/stonehenge/splatfacto/2024-09-11_100724/config.yml')
 
             radius = 0.015
             amax = 0.1
@@ -75,7 +83,10 @@ for scene_name in ['flight', 'statues', 'old_union']: #['stonehenge', 'statues',
             radius_config = 0.475
             mean_config = np.array([-0.064, -0.0064, -0.025])
 
-            path_to_gsplat = Path('outputs/statues/splatfacto/2024-09-11_095852/config.yml')
+            if sparse:
+                path_to_gsplat = Path('outputs/statues/sparse-splat/2024-10-25_114702/config.yml')
+            else:
+                path_to_gsplat = Path('outputs/statues/splatfacto/2024-09-11_095852/config.yml')
 
             radius = 0.03
             amax = 0.1
@@ -91,7 +102,10 @@ for scene_name in ['flight', 'statues', 'old_union']: #['stonehenge', 'statues',
             radius_config = 0.545/2
             mean_config = np.array([0.19, 0.01, -0.02])
 
-            path_to_gsplat = Path('outputs/flight/splatfacto/2024-09-12_172434/config.yml')
+            if sparse:
+                path_to_gsplat = Path('outputs/flight/sparse-splat/2024-10-25_115216/config.yml')
+            else:
+                path_to_gsplat = Path('outputs/flight/splatfacto/2024-09-12_172434/config.yml')
 
             radius = 0.02
             amax = 0.1
@@ -101,18 +115,6 @@ for scene_name in ['flight', 'statues', 'old_union']: #['stonehenge', 'statues',
             upper_bound = torch.tensor([1, 0.5, 0.26], device=device)
 
             resolution = 100
-
-        # elif scene_name == 'flight-low-res':
-        #     radius_z = 0.06
-        #     radius = 0.03
-        #     radius_config = 0.545/2
-        #     mean_config = np.array([0.19, 0.01, -0.02])
-        #     path_to_gsplat = 'flightroom_gaussians_sparse_deep.json'
-        #     path_to_gsplat_high_res = Path('outputs/flight/splatfacto/2024-09-12_172434/config.yml')
-
-            # radius = 0.03
-            # amax = 0.1
-            # vmax = 0.1
 
         print(f"Running {scene_name} with {method}")
 
@@ -134,12 +136,8 @@ for scene_name in ['flight', 'statues', 'old_union']: #['stonehenge', 'statues',
         gsplat = GSplatLoader(path_to_gsplat, device)
         print('Time to load GSplat:', time.time() - tnow)
 
-        spline_planner = SplinePlanner(spline_deg=10, device=device)
+        spline_planner = SplinePlanner(spline_deg=6, device=device)
         
-        # # Load high res gsplat for flight-low-res for comparison
-        # if scene_name == 'flight-low-res':
-        #     gsplat_high_res = GSplatLoader(path_to_gsplat_high_res, device)
-
         if method == 'splatplan' or method == 'splatplan-single-step':
             
             # load voxel config to save time if exists
@@ -189,60 +187,8 @@ for scene_name in ['flight', 'statues', 'old_union']: #['stonehenge', 'statues',
             elif method == 'sfc':
                 output = sfc.generate_path(x, goal)
 
-            elif method == 'splatplan-single-step':
-                raise NotImplementedError
-                traj = [x]
-                times = [0]
-                u_values = []
-                safety = []
-                sucess = []
-                feasible = []
-
-                for i in tqdm(range(n_steps), desc=f"Simulating trajectory {trial}"):
-                    ### ----------------- Safety Filtering ----------------- ###
-                    u = cbf.solve_QP(x, u_des)
-                    ### ----------------- End of Safety Filtering ----------------- ###
-
-                    # We end the trajectory if the solver fails (because we short-circuit the control input if it fails)
-                    if cbf.solver_success == False:
-                        print("Solver failed")
-                        sucess.append(False)
-                        feasible.append(False)
-                        break
-                    else:
-                        feasible.append(True)
-
-                    # Propagate dynamics
-                    x_ = x.clone()
-
-                    traj.append(x)
-                    times.append((i+1) * dt)
-                    u_values.append(u.cpu().numpy())
-                    u_des_values.append(u_des.cpu().numpy())
-
-                    # It's not moving
-                    if torch.norm(x - x_) < 0.001:
-                        # If it's at the goal
-                        if torch.norm(x_ - goal) < 0.001:
-                            print("Reached Goal")
-                            sucess.append(True)
-                        else:
-                            sucess.append(False)
-                        break
-                traj = torch.stack(traj)
-                u_values = np.array(u_values)
-
-                output = {
-                'traj': traj.cpu().numpy().tolist(),
-                'u_out': u_values.tolist(),
-                'time_step': times,
-                'safety': safety,
-                'sucess': sucess,
-                'feasible': feasible,
-                'cbf_solve_time': cbf.times_cbf,
-                'qp_solve_time': cbf.times_qp,
-                'prune_time': cbf.times_prune,
-                }
+            else:
+                raise ValueError(f"Method {method} not recognized")
 
             total_data.append(output)
             print(f"Trial {trial} completed")
@@ -269,7 +215,12 @@ for scene_name in ['flight', 'statues', 'old_union']: #['stonehenge', 'statues',
         os.makedirs('trajs', exist_ok=True)
 
         # write to the file
-        with open(f'trajs/{scene_name}_{method}.json', 'w') as f:
+        if sparse:
+            save_path = f'trajs/{scene_name}_sparse_{method}.json'
+        else:
+            save_path = f'trajs/{scene_name}_{method}.json'
+
+        with open(save_path, 'w') as f:
             json.dump(data, f, indent=4)
 
 # %%

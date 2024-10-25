@@ -211,6 +211,7 @@ class GSplatVoxel():
 
         try:
             assert len(path3d) > 0
+            path3d = np.concatenate([x0.reshape(1, 3).cpu().numpy(), path3d, xf.reshape(1, 3).cpu().numpy()], axis=0)
         except:
             print('Could not find a feasible initialize path. Please change the initial/final positions to not be in collision.')
             path3d = None

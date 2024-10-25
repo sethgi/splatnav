@@ -63,10 +63,9 @@ class SplatPlan():
 
         for it, segment in enumerate(segments):
             # If this is the first line segment, we always create a polytope. Or subsequently, we only instantiate a polytope if the line segment
-            if it == 0:
+            if ( it == 0 ) or ( it == len(segments) - 1 ):
 
                 # Part 2: Computes the collision set
-
                 tnow = time.time()
                 output = self.collision_set.compute_set_one_step(segment)
                 torch.cuda.synchronize()
@@ -108,6 +107,11 @@ class SplatPlan():
         traj, feasible = self.spline_planner.optimize_b_spline(polytopes, x0, xf)
         if not feasible:
             traj = torch.stack([x0, xf], dim=0)
+
+            self.save_polytope(polytopes, 'infeasible.obj')
+
+            print(compute_segment_in_polytope(polytope[0], polytope[1], segments[-1]))
+            raise
         torch.cuda.synchronize()
         times_opt = time.time() - tnow
   
@@ -154,8 +158,29 @@ class SplatPlan():
                                 R_B=None, S_B=self.radius, collision_type='sphere', 
                                 mode='bisection', N=10)
 
+        # With the intersections computed, we can iterate through them and keep a minimal amount of halfspaces
+
+        A = []
+        b = []
+
+        output = {
+            'seedpoint': x_opt,
+            'deltas': deltas,
+            'Q_opt': Q_opt,
+            'K_opt': K_opt,
+            'mu_A': mu_A,
+            'is_not_intersect': is_not_intersect
+        }
+
+        # Loop until we have no more Gaussian intersections.
+        # The idea here is very similar to that done in SFC. For them, they use the Mahalanobis distance to scale their ellipsoid until it 
+        # reaches the first intersection point, create a halfplane there, segment out the points on the wrong side of the halfplane, and then repeat.
+
+        # Instead, we use K_opt as this scaling factor, calculate the halfplane, then inflate the halfplane by the radius of the robot. If the halfplane
+        # does not contain these ellipsoids, then we can safely ignore them. If it does, then we keep them in the queue.
+        while :
         # Compute the polytope
-        A, b, pts = compute_polytope(intersection_output['deltas'], intersection_output['Q_opt'], intersection_output['K_opt'], intersection_output['mu_A'])
+        A, b, _ = compute_polytope(intersection_output['deltas'], intersection_output['Q_opt'], intersection_output['K_opt'], intersection_output['mu_A'])
 
         # The full polytope is a concatenation of the intersection polytope and the bounding box polytope
         A = torch.cat([A, A_bb], dim=0)
@@ -165,11 +190,12 @@ class SplatPlan():
         A = A / norm_A
         b = b / norm_A.squeeze()
 
+        # NOTE: We don't actually do this because its slow and unnecessary IF we are iteratively pruning Gaussians.
         # By manageability, the midpoint should always be clearly within the polytope
         # NOTE: Let's hope there are no errors here.
-        A, b, qhull_pts = h_rep_minimal(A.cpu().numpy(), b.cpu().numpy(), midpoint.cpu().numpy())
+        #A, b, qhull_pts = h_rep_minimal(A.cpu().numpy(), b.cpu().numpy(), midpoint.cpu().numpy())
 
-        return (torch.tensor(A, device=self.device), torch.tensor(b, device=self.device))
+        return (A, b)
 
     def save_polytope(self, polytopes, save_path):
         # Initialize mesh object

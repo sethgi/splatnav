@@ -15,6 +15,8 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # method = 'sfc'
 ### ----------------- Possible Distance Types ----------------- ###
 
+sparse = True
+
 for scene_name in ['statues', 'old_union', 'flight']: #['stonehenge', 'statues', 'flight', 'old_union']:
     for method in ['splatplan']:
 
@@ -24,7 +26,10 @@ for scene_name in ['statues', 'old_union', 'flight']: #['stonehenge', 'statues',
             radius_config = 1.35/2  # radius of xy circle
             mean_config = np.array([0.14, 0.23, -0.15]) # mean of the circle
 
-            path_to_gsplat = Path('outputs/old_union2/splatfacto/2024-09-02_151414/config.yml') # points to where the gsplat params are stored
+            if sparse:
+                path_to_gsplat = Path('outputs/old_union2/sparse-splat/2024-10-25_113753/config.yml')
+            else:
+                path_to_gsplat = Path('outputs/old_union2/splatfacto/2024-09-02_151414/config.yml') # points to where the gsplat params are stored
 
             radius = 0.01       # radius of robot
             amax = 0.1
@@ -40,7 +45,10 @@ for scene_name in ['statues', 'old_union', 'flight']: #['stonehenge', 'statues',
             radius_config = 0.784/2
             mean_config = np.array([-0.08, -0.03, 0.05])
 
-            path_to_gsplat = Path('outputs/stonehenge/splatfacto/2024-09-11_100724/config.yml')
+            if sparse:
+                path_to_gsplat = Path('outputs/stonehenge/sparse-splat/2024-10-25_120323/config.yml')
+            else:
+                path_to_gsplat = Path('outputs/stonehenge/splatfacto/2024-09-11_100724/config.yml')
 
             radius = 0.015
             amax = 0.1
@@ -56,7 +64,10 @@ for scene_name in ['statues', 'old_union', 'flight']: #['stonehenge', 'statues',
             radius_config = 0.475
             mean_config = np.array([-0.064, -0.0064, -0.025])
 
-            path_to_gsplat = Path('outputs/statues/splatfacto/2024-09-11_095852/config.yml')
+            if sparse:
+                path_to_gsplat = Path('outputs/statues/sparse-splat/2024-10-25_114702/config.yml')
+            else:
+                path_to_gsplat = Path('outputs/statues/splatfacto/2024-09-11_095852/config.yml')
 
             radius = 0.03
             amax = 0.1
@@ -72,7 +83,10 @@ for scene_name in ['statues', 'old_union', 'flight']: #['stonehenge', 'statues',
             radius_config = 0.545/2
             mean_config = np.array([0.19, 0.01, -0.02])
 
-            path_to_gsplat = Path('outputs/flight/splatfacto/2024-09-12_172434/config.yml')
+            if sparse:
+                path_to_gsplat = Path('outputs/flight/sparse-splat/2024-10-25_115216/config.yml')
+            else:
+                path_to_gsplat = Path('outputs/flight/splatfacto/2024-09-12_172434/config.yml')
 
             radius = 0.02
             amax = 0.1
@@ -128,8 +142,14 @@ for scene_name in ['statues', 'old_union', 'flight']: #['stonehenge', 'statues',
             safety_margin = []
             for pt in traj:
                 h, grad_h, hess_h, info = gsplat.query_distance(pt, radius=radius, distance_type='ball-to-ellipsoid')
+
+                # NOTE: IMPORTANT!!! h is the squared signed distance minus the radius squared, so we need to undo this, because we want signed distance - radius
                 # record min value of h
-                safety_margin.append(torch.min(h).item())
+                squared_signed_distance = torch.min(h) + radius**2
+                sign_dist = torch.sign(squared_signed_distance)
+                mag_dist = torch.abs(squared_signed_distance)
+                signed_distance = sign_dist * torch.sqrt(mag_dist) - radius
+                safety_margin.append(signed_distance.item())
 
             # Compute the total path length
             path_length = torch.sum(torch.norm(traj[1:] - traj[:-1], dim=1)).item()
@@ -156,8 +176,14 @@ for scene_name in ['statues', 'old_union', 'flight']: #['stonehenge', 'statues',
 
                 for vertex in vertices:
                     h, grad_h, hess_h, info = gsplat.query_distance(vertex, radius=radius, distance_type='ball-to-ellipsoid')
+
+                    squared_signed_distance = torch.min(h) + radius**2
+                    sign_dist = torch.sign(squared_signed_distance)
+                    mag_dist = torch.abs(squared_signed_distance)
+                    signed_distance = sign_dist * torch.sqrt(mag_dist) - radius
+
                     # record min value of h
-                    polytope_margin.append(torch.min(h).item())
+                    polytope_margin.append(signed_distance.item())
 
             data['safety_margin'] = safety_margin
             data['path_length'] = path_length

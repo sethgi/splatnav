@@ -150,6 +150,7 @@ def get_qp_matrices(T, dT, ddT, dddT, ddddT, polytopes, x0, xf, device):
     C_[3:, -n_e:] = pf
 
     d_ = torch.cat([x0, xf], dim=0)
+    #d_ = torch.cat([x0, torch.zeros(3, device=device)], dim=0)
 
     # Concatenate G and h matrices
     C = torch.cat([C, C_], dim=0)
@@ -161,10 +162,11 @@ def get_qp_matrices(T, dT, ddT, dddT, ddddT, polytopes, x0, xf, device):
 
 ######################################################################################################
 class SplinePlanner():
-    def __init__(self, spline_deg=6, N_sec=10, device='cpu') -> None:
+    def __init__(self, spline_deg=6, N_sec=10, device='cpu', use_cvxpy=False) -> None:
         self.spline_deg = spline_deg
         self.N_sec = N_sec
         self.device = device
+        self.use_cvxpy = use_cvxpy
 
         ### Create the time points matrix/coefficients for the Bezier curve
         self.time_pts = create_time_pts(deg=spline_deg, N_sec=N_sec, device=device)
@@ -252,41 +254,73 @@ class SplinePlanner():
 
         ###### CLARABEL #######
 
-        P = sparse.csc_matrix(Q_prob)
-        A = sparse.csc_matrix(np.concatenate([C_prob, A_prob], axis=0))
+        if self.use_cvxpy:
+            x = cvx.Variable(n_var)
 
-        q = np.zeros(n_var)
-        b = np.concatenate([d_prob, b_prob], axis=0)
+            loss = cvx.quad_form(x, Q_prob)
+            objective = cvx.Minimize(loss)
+            constraints = [A_prob @ x <= b_prob, C_prob @ x == d_prob]
 
-        cones = [clarabel.ZeroConeT(C_prob.shape[0]), clarabel.NonnegativeConeT(A_prob.shape[0])]
+            prob = cvx.Problem(objective, constraints)
+            prob.solve(solver='ECOS')
 
-        settings = clarabel.DefaultSettings()
-        settings.verbose = False
+            # Check solver status
+            if prob.status in ["infeasible", "unbounded"]:
+                print(f"Solver status: {prob.status}")
+                #print(f"Number of iterations: {sol.iterations}")
+                print('CVXPY did not solve the problem!')
+                solver_success = False
+                solution = None
+                self.coeffs = None
 
-        solver = clarabel.DefaultSolver(P, q, A, b, cones, settings)
+            else:
+                solver_success = True
+                solution = np.array(x.value)
 
-        sol = solver.solve()
-
-        # Check solver status
-        if str(sol.status) != 'Solved':
-            print(f"Solver status: {sol.status}")
-            #print(f"Number of iterations: {sol.iterations}")
-            print('Clarabel did not solve the problem!')
-            solver_success = False
-            solution = None
-            self.coeffs = None
+                coeffs = []
+                cof_splits = np.split(solution, N_sections)
+                for cof_split in cof_splits:
+                    xyz = np.split(cof_split, 3)
+                    cof = np.stack(xyz, axis=0)
+                    coeffs.append(cof)
+                self.coeffs = np.array(coeffs)
 
         else:
-            solver_success = True
-            solution = np.array(sol.x)
+            P = sparse.csc_matrix(Q_prob)
+            A = sparse.csc_matrix(np.concatenate([C_prob, A_prob], axis=0))
 
-            coeffs = []
-            cof_splits = np.split(solution, N_sections)
-            for cof_split in cof_splits:
-                xyz = np.split(cof_split, 3)
-                cof = np.stack(xyz, axis=0)
-                coeffs.append(cof)
-            self.coeffs = np.array(coeffs)
+            q = np.zeros(n_var)
+            b = np.concatenate([d_prob, b_prob], axis=0)
+
+            cones = [clarabel.ZeroConeT(C_prob.shape[0]), clarabel.NonnegativeConeT(A_prob.shape[0])]
+
+            settings = clarabel.DefaultSettings()
+            settings.verbose = False
+
+            solver = clarabel.DefaultSolver(P, q, A, b, cones, settings)
+
+            sol = solver.solve()
+
+            # Check solver status
+            if str(sol.status) != 'Solved':
+                print(f"Solver status: {sol.status}")
+                #print(f"Number of iterations: {sol.iterations}")
+                print('Clarabel did not solve the problem!')
+                solver_success = False
+                solution = None
+                self.coeffs = None
+
+            else:
+                solver_success = True
+                solution = np.array(sol.x)
+
+                coeffs = []
+                cof_splits = np.split(solution, N_sections)
+                for cof_split in cof_splits:
+                    xyz = np.split(cof_split, 3)
+                    cof = np.stack(xyz, axis=0)
+                    coeffs.append(cof)
+                self.coeffs = np.array(coeffs)
 
         return self.coeffs, solver_success
 

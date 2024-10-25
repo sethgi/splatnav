@@ -272,8 +272,6 @@ ax[2, 1].set_axisbelow(True)
 for location in ['left', 'right', 'top', 'bottom']:
     ax[2, 1].spines[location].set_linewidth(4)
 
-
-
 plt.savefig(f'simulation_stats.png', dpi=500)
 
 #%%

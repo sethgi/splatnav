@@ -454,7 +454,7 @@ class Corridor():
             # If this is the first line segment, we always create a polytope. Or subsequently, we only instantiate a polytope if the line segment
             midpoint = 0.5 * (segment[0] + segment[1])
 
-            if it == 0:
+            if it == 0 or it == len(segments) - 1:
                 # Part 2: Computes the collision set
                 tnow = time.time()
                 output = self.collision_set.compute_set_one_step(segment)
