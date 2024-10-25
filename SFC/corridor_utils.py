@@ -1,6 +1,7 @@
 from .astar_utils import *
 import torch
 import numpy as np
+import scipy
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import copy
@@ -8,6 +9,7 @@ import time
 
 from initialization.grid_utils import GSplatVoxel
 from polytopes.collision_set import GSplatCollisionSet
+from polytopes.polytopes_utils import h_rep_minimal, find_interior, compute_segment_in_polytope
 
 # All functions are adapted and named accordingly to the "Planning Dynamically Feasible Trajectories for Quadrotors Using Safe Flight Corridors in 3-D Complex Environments"
 #  paper (https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=7839930). These functions have been adapted into Pytorch.
@@ -341,9 +343,6 @@ class Corridor():
         As = As * (1. / S)[None, :] @ R.T    # M x 3
         bs = bs + torch.sum(midpoint[None, :] * As, dim=-1)    # M
 
-        As = torch.cat([As, self.box_As], dim=0)
-        bs = torch.cat([bs, self.box_bs], dim=0)
-
         return As, bs, ps_star
     
 
@@ -359,80 +358,80 @@ class Corridor():
 
         return bs_new
 
-    def shrink_and_pivot_corridor(self, As, bs, line_segment, pivots):
-        # As: M x 3
-        # bs: M
-        # line_segment: 2 x 3
-        # pivots: M x 3
+    # def shrink_and_pivot_corridor(self, As, bs, line_segment, pivots):
+    #     # As: M x 3
+    #     # bs: M
+    #     # line_segment: 2 x 3
+    #     # pivots: M x 3
 
-        point1 = line_segment[0]
-        point2 = line_segment[1]
+    #     point1 = line_segment[0]
+    #     point2 = line_segment[1]
 
-        # NOTE: We need to segment out the hyperplanes that are within some radius of the robot. 
-        # All hyperplanes should contain the line segment by design, and so the hyperplane
-        # will not intersect the middle of the line segment, thus the min distance must occur at 
-        # one of the end points.
-        signed_distance_to_point1 = torch.sum( torch.matmul(As, torch.transpose((point1[None, :] - pivots), 0, 1)), dim=-1) / torch.linalg.norm(As, dim=-1)     # M
-        signed_distance_to_point2 = torch.sum( torch.matmul(As, torch.transpose((point2[None, :] - pivots), 0, 1)), dim=-1) / torch.linalg.norm(As, dim=-1)     # M
+    #     # NOTE: We need to segment out the hyperplanes that are within some radius of the robot. 
+    #     # All hyperplanes should contain the line segment by design, and so the hyperplane
+    #     # will not intersect the middle of the line segment, thus the min distance must occur at 
+    #     # one of the end points.
+    #     signed_distance_to_point1 = torch.sum( torch.matmul(As, torch.transpose((point1[None, :] - pivots), 0, 1)), dim=-1) / torch.linalg.norm(As, dim=-1)     # M
+    #     signed_distance_to_point2 = torch.sum( torch.matmul(As, torch.transpose((point2[None, :] - pivots), 0, 1)), dim=-1) / torch.linalg.norm(As, dim=-1)     # M
 
-        print(f'Signed Distance to Point 1: {signed_distance_to_point1}')
-        print(f'Signed Distance to Point 2: {signed_distance_to_point2}')
-        # As a sanity check, we should check if these signed distances are all negative (meaning the hyperplane is on the correct side).
-        # TODO:
-        hyperplane_ok = torch.logical_and( (signed_distance_to_point1 < -self.radius),  (signed_distance_to_point2 < -self.radius) )
+    #     print(f'Signed Distance to Point 1: {signed_distance_to_point1}')
+    #     print(f'Signed Distance to Point 2: {signed_distance_to_point2}')
+    #     # As a sanity check, we should check if these signed distances are all negative (meaning the hyperplane is on the correct side).
+    #     # TODO:
+    #     hyperplane_ok = torch.logical_and( (signed_distance_to_point1 < -self.radius),  (signed_distance_to_point2 < -self.radius) )
 
-        hyperplanes_to_adjust = As[~hyperplane_ok]
-        pivots_to_adjust = pivots[~hyperplane_ok]
+    #     hyperplanes_to_adjust = As[~hyperplane_ok]
+    #     pivots_to_adjust = pivots[~hyperplane_ok]
 
-        # For the hyperplanes that we don't have to adjust, we need to shift them by the robot radius.
-        # To do this, we basically move the pivot point by the robot radius in the direction opposite of the normal.
-        hyperplane_ok_A = As[hyperplane_ok]
+    #     # For the hyperplanes that we don't have to adjust, we need to shift them by the robot radius.
+    #     # To do this, we basically move the pivot point by the robot radius in the direction opposite of the normal.
+    #     hyperplane_ok_A = As[hyperplane_ok]
 
-        deflated_pivots = pivots[hyperplane_ok] - self.radius * hyperplane_ok_A / torch.linalg.norm(hyperplane_ok_A, dim=-1, keepdim=True)    # M x 3
+    #     deflated_pivots = pivots[hyperplane_ok] - self.radius * hyperplane_ok_A / torch.linalg.norm(hyperplane_ok_A, dim=-1, keepdim=True)    # M x 3
 
-        hyperplane_ok_b = torch.sum( hyperplane_ok_A * deflated_pivots, dim=-1)    # M
+    #     hyperplane_ok_b = torch.sum( hyperplane_ok_A * deflated_pivots, dim=-1)    # M
 
-        # The closest distance between a line segment and a plane has to be at one of the endpoints
-        # if the line segment is not parallel to the plane and the line segment does not intersect the plane.
-        # Note that the outgoing hyperplane is already pushed some R away from the pivot, and so is ready to go
-        # in terms of using it for point-based planning.
-        if hyperplanes_to_adjust.shape[0] > 0:  
-            adjusted_A1, adjusted_b1, objs1 = find_closest_hyperplane(pivots_to_adjust, hyperplanes_to_adjust, point1, self.radius)        # M x 2 x 3, M x 2
-            adjusted_A2, adjusted_b2, objs2 = find_closest_hyperplane(pivots_to_adjust, hyperplanes_to_adjust, point2, self.radius)
+    #     # The closest distance between a line segment and a plane has to be at one of the endpoints
+    #     # if the line segment is not parallel to the plane and the line segment does not intersect the plane.
+    #     # Note that the outgoing hyperplane is already pushed some R away from the pivot, and so is ready to go
+    #     # in terms of using it for point-based planning.
+    #     if hyperplanes_to_adjust.shape[0] > 0:  
+    #         adjusted_A1, adjusted_b1, objs1 = find_closest_hyperplane(pivots_to_adjust, hyperplanes_to_adjust, point1, self.radius)        # M x 2 x 3, M x 2
+    #         adjusted_A2, adjusted_b2, objs2 = find_closest_hyperplane(pivots_to_adjust, hyperplanes_to_adjust, point2, self.radius)
 
-        if adjusted_A1 is None or adjusted_A2 is None:
-            return None, None
+    #     if adjusted_A1 is None or adjusted_A2 is None:
+    #         return None, None
 
-        adjusted_A = torch.cat([adjusted_A1, adjusted_A2], dim=1)    # M x 4 x 3
-        adjusted_b = torch.cat([adjusted_b1, adjusted_b2], dim=1)    # M x 4
-        objs = torch.cat([objs1, objs2], dim=-1)    # M x 4
+    #     adjusted_A = torch.cat([adjusted_A1, adjusted_A2], dim=1)    # M x 4 x 3
+    #     adjusted_b = torch.cat([adjusted_b1, adjusted_b2], dim=1)    # M x 4
+    #     objs = torch.cat([objs1, objs2], dim=-1)    # M x 4
 
-        # Test if the closest hyperplane using one point is still on the same side as the other point
-        plane1_to_point2 = torch.sum( adjusted_A1 * point2[None, None, :], dim=-1) - adjusted_b1  # M x 2
-        plane2_to_point1 = torch.sum( adjusted_A2 * point1[None, None, :], dim=-1) - adjusted_b2  # M x 2
+    #     # Test if the closest hyperplane using one point is still on the same side as the other point
+    #     plane1_to_point2 = torch.sum( adjusted_A1 * point2[None, None, :], dim=-1) - adjusted_b1  # M x 2
+    #     plane2_to_point1 = torch.sum( adjusted_A2 * point1[None, None, :], dim=-1) - adjusted_b2  # M x 2
 
-        # planei_to_pointj should be less than 0 for at least one (i,j) pair / solution.
-        # basically pick the option that has the greatest non-positive objective value
-        plane_to_point = (torch.cat([plane1_to_point2, plane2_to_point1], dim=-1) <= 0.).to(int)    # M x 4
-        plane_to_point_positive = (plane_to_point == 0)
+    #     # planei_to_pointj should be less than 0 for at least one (i,j) pair / solution.
+    #     # basically pick the option that has the greatest non-positive objective value
+    #     plane_to_point = (torch.cat([plane1_to_point2, plane2_to_point1], dim=-1) <= 0.).to(int)    # M x 4
+    #     plane_to_point_positive = (plane_to_point == 0)
 
-        # If all solutions are on the wrong side, we quit
-        if torch.any(torch.all(plane_to_point_positive, dim=-1)):
-            return None, None
+    #     # If all solutions are on the wrong side, we quit
+    #     if torch.any(torch.all(plane_to_point_positive, dim=-1)):
+    #         return None, None
         
-        plane_to_point[plane_to_point_positive] = int(1e6)
-        plane_to_point_obj = plane_to_point * (objs + 1e-3)   # M x 4
-        min_obj, min_idx = torch.min(plane_to_point_obj, dim=-1)    # M
+    #     plane_to_point[plane_to_point_positive] = int(1e6)
+    #     plane_to_point_obj = plane_to_point * (objs + 1e-3)   # M x 4
+    #     min_obj, min_idx = torch.min(plane_to_point_obj, dim=-1)    # M
 
-        # Now we select the closest hyperplane
-        adjusted_A = adjusted_A[torch.arange(adjusted_A.shape[0]), min_idx]    # M x 3
-        adjusted_b = adjusted_b[torch.arange(adjusted_b.shape[0]), min_idx]    # M
+    #     # Now we select the closest hyperplane
+    #     adjusted_A = adjusted_A[torch.arange(adjusted_A.shape[0]), min_idx]    # M x 3
+    #     adjusted_b = adjusted_b[torch.arange(adjusted_b.shape[0]), min_idx]    # M
 
-        # Now we stack the good hyperplanes with the adjusted ones
-        As = torch.cat([hyperplane_ok_A, adjusted_A], dim=0)
-        bs = torch.cat([hyperplane_ok_b, adjusted_b], dim=0)
+    #     # Now we stack the good hyperplanes with the adjusted ones
+    #     As = torch.cat([hyperplane_ok_A, adjusted_A], dim=0)
+    #     bs = torch.cat([hyperplane_ok_b, adjusted_b], dim=0)
 
-        return As, bs
+    #     return As, bs
 
 
     def generate_path(self, x0, xf):
@@ -453,34 +452,119 @@ class Corridor():
 
         for it, segment in enumerate(segments):
             # If this is the first line segment, we always create a polytope. Or subsequently, we only instantiate a polytope if the line segment
+            midpoint = 0.5 * (segment[0] + segment[1])
 
-            # Part 2: Computes the collision set
-            tnow = time.time()
-            output = self.collision_set.compute_set_one_step(segment)
-            torch.cuda.synchronize()
-            point_cloud = output['means']
-            self.box_As = output['A_bb']
-            self.box_bs = output['b_bb_shrunk']
-            times_collision_set += time.time() - tnow
+            if it == 0:
+                # Part 2: Computes the collision set
+                tnow = time.time()
+                output = self.collision_set.compute_set_one_step(segment)
+                torch.cuda.synchronize()
 
-            # Part 3: Compute the ellipsoid
-            tnow = time.time()
-            ellipsoid, d, p_stars = self.find_ellipsoid(segment, point_cloud)
-            torch.cuda.synchronize()
-            times_ellipsoid += time.time() - tnow
+                point_cloud = output['means']
+                self.box_As = output['A_bb']
+                self.box_bs = output['b_bb_shrunk']
+                times_collision_set += time.time() - tnow
 
-            # Part 4: Compute the polytope
-            tnow = time.time()
-            As, bs, ps_star = self.find_polyhedron(point_cloud, d, ellipsoid)
-            torch.cuda.synchronize()
-            times_collision_set += time.time() - tnow
-            
-            # Part 5: Shrink the polytope
-            bs_shrunk = bs - self.radius * torch.norm(As, dim=-1)
 
-            # save polytope
-            polytope = (As, bs_shrunk)
-            
+                if len(output['gaussian_ids']) == 0:
+                    polytope = (self.box_As, self.box_bs)
+                
+                else:
+
+                    # Part 3: Compute the ellipsoid
+                    tnow = time.time()
+                    ellipsoid, d, p_stars = self.find_ellipsoid(segment, point_cloud)
+                    torch.cuda.synchronize()
+                    times_ellipsoid += time.time() - tnow
+
+                    # Part 4: Compute the polytope
+                    tnow = time.time()
+                    As, bs, ps_star = self.find_polyhedron(point_cloud, d, ellipsoid)
+                    
+                    # Part 5: Shrink the polytope
+                    bs = bs - self.radius * torch.norm(As, dim=-1)
+
+                    As = torch.cat([As, self.box_As], dim=0)
+                    bs = torch.cat([bs, self.box_bs], dim=0)
+                    
+                    # save polytope
+                    # polytope = (As, bs)
+
+                    # Concatenate the bounding box constraints with the point cloud polyhedron
+                    # As = torch.cat([As, self.box_As], dim=0)
+                    # bs_shrunk = torch.cat([bs_shrunk, self.box_bs], dim=0)
+
+                    norm_A = torch.linalg.norm(As, dim=-1, keepdims=True)
+                    As = As / norm_A
+                    bs = bs / norm_A.squeeze()
+
+                    # By manageability, the midpoint should always be clearly within the polytope
+                    # NOTE: Let's hope there are no errors here.
+                    #A, b, qhull_pts = h_rep_minimal(As.cpu().numpy(), bs.cpu().numpy(), midpoint.cpu().numpy())
+
+                    polytope = (torch.tensor(As, device=self.device), torch.tensor(bs, device=self.device))
+
+                    torch.cuda.synchronize()
+                    times_polytope += time.time() - tnow
+
+            else:
+                # Test if the line segment is within the polytope
+                # If the segment is within the polytope, we proceed to next segment
+                if compute_segment_in_polytope(polytope[0], polytope[1], segment):
+
+                    continue
+
+                else:
+                    # Part 2: Computes the collision set
+                    tnow = time.time()
+                    output = self.collision_set.compute_set_one_step(segment)
+                    torch.cuda.synchronize()
+                    point_cloud = output['means']
+                    self.box_As = output['A_bb']
+                    self.box_bs = output['b_bb_shrunk']
+                    times_collision_set += time.time() - tnow
+
+                    if len(output['gaussian_ids']) == 0:
+                        polytope = (self.box_As, self.box_bs)
+                    
+                    else:
+
+                        # Part 3: Compute the ellipsoid
+                        tnow = time.time()
+                        ellipsoid, d, p_stars = self.find_ellipsoid(segment, point_cloud)
+                        torch.cuda.synchronize()
+                        times_ellipsoid += time.time() - tnow
+
+                        # Part 4: Compute the polytope
+                        tnow = time.time()
+                        As, bs, ps_star = self.find_polyhedron(point_cloud, d, ellipsoid)
+                        
+                        # Part 5: Shrink the polytope
+                        bs = bs - self.radius * torch.norm(As, dim=-1)
+
+                        As = torch.cat([As, self.box_As], dim=0)
+                        bs = torch.cat([bs, self.box_bs], dim=0)
+
+                        # save polytope
+                        # polytope = (As, bs)
+
+                        # Concatenate the bounding box constraints with the point cloud polyhedron
+                        # As = torch.cat([As, self.box_As], dim=0)
+                        # bs_shrunk = torch.cat([bs_shrunk, self.box_bs], dim=0)
+
+                        norm_A = torch.linalg.norm(As, dim=-1, keepdims=True)
+                        As = As / norm_A
+                        bs = bs / norm_A.squeeze()
+
+                        # By manageability, the midpoint should always be clearly within the polytope
+                        # NOTE: Let's hope there are no errors here.
+                        #A, b, qhull_pts = h_rep_minimal(As.cpu().numpy(), bs.cpu().numpy(), midpoint.cpu().numpy())
+        
+                        polytope = (torch.tensor(As, device=self.device), torch.tensor(bs, device=self.device))
+
+                        torch.cuda.synchronize()
+                        times_polytope += time.time() - tnow
+                
             polytopes.append(polytope)
 
         # Step 6: Perform Bezier spline optimization
@@ -505,7 +589,33 @@ class Corridor():
             'feasible': feasible
         }
 
+        #self.save_polytope(polytopes, 'sfc_corridor.obj')
         return traj_data
+    
+    def save_polytope(self, polytopes, save_path):
+        # Initialize mesh object
+        mesh = o3d.geometry.TriangleMesh()
+
+        for (A, b) in polytopes:
+            # Transfer all tensors to numpy
+            A = A.cpu().numpy()
+            b = b.cpu().numpy()
+
+            pt = find_interior(A, b)
+
+            halfspaces = np.concatenate([A, -b[..., None]], axis=-1)
+            hs = scipy.spatial.HalfspaceIntersection(halfspaces, pt, incremental=False, qhull_options=None)
+            qhull_pts = hs.intersections
+
+            pcd_object = o3d.geometry.PointCloud()
+            pcd_object.points = o3d.utility.Vector3dVector(qhull_pts)
+            bb_mesh, qhull_indices = pcd_object.compute_convex_hull()
+            mesh += bb_mesh
+        
+        success = o3d.io.write_triangle_mesh(save_path, mesh, print_progress=True)
+
+        return success
+
 
 
 

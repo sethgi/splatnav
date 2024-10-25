@@ -25,6 +25,8 @@ t_z = 10*np.linspace(0, 2*np.pi, n)
 
 # flag for using saved planner / corridor data
 use_saved = False
+config_path_base = 'configs'
+os.makedirs(config_path_base, exist_ok=True)
 
 ### ----------------- Possible Methods ----------------- ###
 # method = 'splatplan'
@@ -32,8 +34,8 @@ use_saved = False
 # TODO: splatplan-single-step, A*
 ### ----------------- Possible Distance Types ----------------- ###
 
-for scene_name in ['flight']: #['stonehenge', 'statues', 'flight', 'old_union']:
-    for method in ['sfc']:
+for scene_name in ['flight', 'statues', 'old_union']: #['stonehenge', 'statues', 'flight', 'old_union']:
+    for method in ['splatplan']:
 
         # NOTE: POPULATE THE UPPER AND LOWER BOUNDS FOR OTHER SCENES!!!
         if scene_name == 'old_union':
@@ -132,13 +134,11 @@ for scene_name in ['flight']: #['stonehenge', 'statues', 'flight', 'old_union']:
         gsplat = GSplatLoader(path_to_gsplat, device)
         print('Time to load GSplat:', time.time() - tnow)
 
-        spline_planner = SplinePlanner(device=device)
+        spline_planner = SplinePlanner(spline_deg=10, device=device)
         
         # # Load high res gsplat for flight-low-res for comparison
         # if scene_name == 'flight-low-res':
         #     gsplat_high_res = GSplatLoader(path_to_gsplat_high_res, device)
-
-        config_path_base = 'configs'
 
         if method == 'splatplan' or method == 'splatplan-single-step':
             
