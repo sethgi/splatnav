@@ -478,9 +478,8 @@ class Corridor():
             # Part 5: Shrink the polytope
             bs_shrunk = bs - self.radius * torch.norm(As, dim=-1)
 
-
             # save polytope
-            polytope = (As, bs)
+            polytope = (As, bs_shrunk)
             
             polytopes.append(polytope)
 
