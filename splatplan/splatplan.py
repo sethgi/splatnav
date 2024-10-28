@@ -160,17 +160,17 @@ class SplatPlan():
 
         # With the intersections computed, we can iterate through them and keep a minimal amount of halfspaces
 
-        A = []
-        b = []
+        # A = []
+        # b = []
 
-        output = {
-            'seedpoint': x_opt,
-            'deltas': deltas,
-            'Q_opt': Q_opt,
-            'K_opt': K_opt,
-            'mu_A': mu_A,
-            'is_not_intersect': is_not_intersect
-        }
+        # output = {
+        #     'seedpoint': x_opt,
+        #     'deltas': deltas,
+        #     'Q_opt': Q_opt,
+        #     'K_opt': K_opt,
+        #     'mu_A': mu_A,
+        #     'is_not_intersect': is_not_intersect
+        # }
 
         # Loop until we have no more Gaussian intersections.
         # The idea here is very similar to that done in SFC. For them, they use the Mahalanobis distance to scale their ellipsoid until it 
@@ -178,7 +178,7 @@ class SplatPlan():
 
         # Instead, we use K_opt as this scaling factor, calculate the halfplane, then inflate the halfplane by the radius of the robot. If the halfplane
         # does not contain these ellipsoids, then we can safely ignore them. If it does, then we keep them in the queue.
-        while :
+        #while :
         # Compute the polytope
         A, b, _ = compute_polytope(intersection_output['deltas'], intersection_output['Q_opt'], intersection_output['K_opt'], intersection_output['mu_A'])
 
