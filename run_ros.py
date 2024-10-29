@@ -24,6 +24,11 @@ import numpy as np
 from rclpy.duration import Duration
 import time
 
+import threading
+import sys
+import select
+import tty
+import termios
 
 
 class ControlNode(Node):
@@ -71,6 +76,13 @@ class ControlNode(Node):
 
         self.timer = self.create_timer(1.0 / 50.0, self.publish_control)
 
+        self.start_mission = False
+
+        # Start the keyboard listener thread
+        self.keyboard_thread = threading.Thread(target=self.key_listener)
+        self.keyboard_thread.daemon = True
+        self.keyboard_thread.start()
+
         self.traj = splatNav(self.position_output, self.goal)
 
     def odometry_callback(self, msg):
@@ -86,6 +98,25 @@ class ControlNode(Node):
             self.fmu_vel[1] = msg.velocity[1]
             # print("we are getting odom")
             pass
+
+    def key_listener(self):
+        print("Press the space bar to start the mission.")
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setcbreak(fd)
+            while not self.start_mission:
+                dr, dw, de = select.select([sys.stdin], [], [], 0)
+                if dr:
+                    c = sys.stdin.read(1)
+                    if c == ' ':
+                        self.start_mission = True
+                        print("Space bar pressed. Starting trajectory.")
+                        break
+        except Exception as e:
+            print(e)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
             
 
     def publish_control(self):
