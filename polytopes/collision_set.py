@@ -46,6 +46,21 @@ def compute_bounding_box(path, rs):
 
     return A, b
 
+def ellipsoid_halfspace_intersection(means, rots, scales, A, b):
+    # This comparison tensor will be N (num of Gaussians) x 6 (num of hyperplanes)
+    a_times_mu = means @ A.T
+    numerator = b[None, :] - a_times_mu        # N x 6
+
+    a_times_R = rots.transpose(1, 2) @ A.T # N x 3 x 6 
+    denominator = torch.linalg.norm( a_times_R * scales[..., None] , dim=1)    # N x 6
+
+    distance = -numerator / denominator
+
+    # A gaussian must satisfy the metric for all 6 hyperplanes
+    keep_gaussian = (distance <= 1.).all(dim=-1)      # mask of length N
+
+    return keep_gaussian
+
 # def bounding_box_and_points(self, path, point_cloud):
 #     # path: N+1 x 3
 #     # point_cloud: M x 3
@@ -126,17 +141,19 @@ class GSplatCollisionSet():
         collision_set_ids = []
         for i, (A0, b0) in enumerate(zip(A, b)):
 
-            # This comparison tensor will be N (num of Gaussians) x 6 (num of hyperplanes)
-            a_times_mu = self.means @ A0.T
-            numerator = b0[None, :] - a_times_mu        # N x 6
+            # # This comparison tensor will be N (num of Gaussians) x 6 (num of hyperplanes)
+            # a_times_mu = self.means @ A0.T
+            # numerator = b0[None, :] - a_times_mu        # N x 6
 
-            a_times_R = self.rots.transpose(1, 2) @ A0.T # N x 3 x 6 
-            denominator = torch.linalg.norm( a_times_R * self.scales[..., None] , dim=1)    # N x 6
+            # a_times_R = self.rots.transpose(1, 2) @ A0.T # N x 3 x 6 
+            # denominator = torch.linalg.norm( a_times_R * self.scales[..., None] , dim=1)    # N x 6
 
-            distance = -numerator / denominator
+            # distance = -numerator / denominator
 
-            # A gaussian must satisfy the metric for all 6 hyperplanes
-            keep_gaussian = (distance <= 1.).all(dim=-1)      # mask of length N
+            # # A gaussian must satisfy the metric for all 6 hyperplanes
+            # keep_gaussian = (distance <= 1.).all(dim=-1)      # mask of length N
+
+            keep_gaussian = ellipsoid_halfspace_intersection(self.means, self.rots, self.scales, A0, b0)
 
             # Save the indices of the gaussians that are within the bounding box
             data = {

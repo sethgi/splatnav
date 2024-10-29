@@ -29,248 +29,340 @@ fig, ax = plt.subplots(3, 2, figsize=(10, 10), dpi=200)
 font = {
         'family': 'Arial',
         'weight' : 'bold',
-        'size'   : 20}
+        'size'   : 15}
 
 matplotlib.rc('font', **font)
-for k, scene_name in enumerate(scene_names):
 
-    for j, method in enumerate(methods):
-        save_fp = str(Path(os.getcwd()).parent.absolute()) + f'/trajs/{scene_name}_{method}_processed.json'
+for l, sparse in enumerate([False, True]):
+    for k, scene_name in enumerate(scene_names):
 
-        with open(save_fp, 'r') as f:
-            meta = json.load(f)
+        for j, method in enumerate(methods):
 
-        datas = meta['total_data']
+            if sparse:
+                read_path = f'trajs/{scene_name}_sparse_{method}_processed.json'
+            else:
+                read_path = f'trajs/{scene_name}_{method}_processed.json'
+            save_fp = os.path.join(str(Path(os.getcwd()).parent.absolute()), read_path)
 
-        if method == 'sfc':
-            col = '#34A853'
-            linewidth= 3
- 
-            success = []
-            safety = []
-            polytope_safety = []
-            times = []
-            polytope_vols = []
-            polytope_radii = []
-            path_length = []
+            with open(save_fp, 'r') as f:
+                meta = json.load(f)
 
-            num_facets = []
+            datas = meta['total_data']
 
-            # Per trajectory
-            for i, data in enumerate(datas):
+            if method == 'sfc':
+                col = '#34A853'
+                linewidth= 3
+    
+                success = []
+                safety = []
+                polytope_safety = []
+                times = []
+                polytope_vols = []
+                polytope_radii = []
+                path_length = []
+                eccentricity = []
 
-                # If the trajectory wasn't feasible to solve, we don't store any data on it besides the success.
-                if not data['feasible']:
-                    success.append(False)
-                    continue
+                num_facets = []
 
-                else:
-                    success.append(True)
+                # Per trajectory
+                for i, data in enumerate(datas):
 
-                num_polytopes = data['num_polytopes']
+                    # If the trajectory wasn't feasible to solve, we don't store any data on it besides the success.
+                    if not data['feasible']:
+                        success.append(False)
+                        continue
 
-                # record the times
-                traj_time = np.array([data['times_astar'], data['times_collision_set'], data['times_ellipsoid'],
-                                    data['times_polytope'], data['times_opt']])
+                    else:
+                        success.append(True)
 
-                times.append(traj_time)
+                    num_polytopes = data['num_polytopes']
 
-                # record the min safety margin
-                safety.append(np.array(data['safety_margin']).min())
-                polytope_safety.append(np.array(data['polytope_margin']).min())
-                path_length.append(data['path_length'])
+                    # record the times
+                    traj_time = np.array([data['times_astar'], data['times_collision_set'], data['times_ellipsoid'],
+                                        data['times_polytope'], data['times_opt']])
 
-                # record the polytope stats (min/max/mean/std)
-                polytope_vols_entry = np.array(data['polytope_vols'])
-                polytope_radii_entry = np.array(data['polytope_radii'])
+                    times.append(traj_time)
 
-                polytope_vols.append([polytope_vols_entry.min(), polytope_vols_entry.max(), polytope_vols_entry.mean(), polytope_vols_entry.std()])
-                polytope_radii.append([polytope_radii_entry.min(), polytope_radii_entry.max(), polytope_radii_entry.mean(), polytope_radii_entry.std()])
+                    # record the min safety margin
+                    safety.append(np.array(data['safety_margin']).min())
+                    polytope_safety.append(np.array(data['polytope_margin']).min())
+                    path_length.append(data['path_length'])
 
-                polytope_length = np.array([len(np.array(poly)) for poly in data['polytopes']]).mean()
+                    # record the polytope stats (min/max/mean/std)
+                    polytope_vols_entry = np.array(data['polytope_vols'])
+                    polytope_radii_entry = np.array(data['polytope_radii'])
 
-                num_facets.append(polytope_length)
+                    polytope_eccentricity = (4/3 * np.pi * (polytope_radii_entry**3)) / polytope_vols_entry
 
-            success = np.array(success)
-            safety = np.array(safety)
-            polytope_safety = np.array(polytope_safety)
-            times = np.array(times)
-            polytope_vols = np.array(polytope_vols)
-            polytope_radii = np.array(polytope_radii)
-            path_length = np.array(path_length)
 
-            print(f'{scene_name}_{method}', np.array(num_facets).mean())
+                    polytope_vols.append([polytope_vols_entry.min(), polytope_vols_entry.max(), polytope_vols_entry.mean(), polytope_vols_entry.std()])
+                    polytope_radii.append([polytope_radii_entry.min(), polytope_radii_entry.max(), polytope_radii_entry.mean(), polytope_radii_entry.std()])
+                    eccentricity.append([polytope_eccentricity.min(), polytope_eccentricity.max(), polytope_eccentricity.mean(), polytope_eccentricity.std()])
 
-        elif method == 'splatplan':
-            col = '#4285F4'
-            linewidth=3
+                    polytope_length = np.array([len(np.array(poly)) for poly in data['polytopes']]).mean()
 
-            success = []
-            safety = []
-            polytope_safety = []
-            times = []
-            polytope_vols = []
-            polytope_radii = []
-            path_length = []
+                    num_facets.append(polytope_length)
 
-            num_facets = []
+                success = np.array(success)
+                safety = np.array(safety)
+                polytope_safety = np.array(polytope_safety)
+                times = np.array(times)
+                polytope_vols = np.array(polytope_vols)
+                polytope_radii = np.array(polytope_radii)
+                eccentricity = np.array(eccentricity)
+                path_length = np.array(path_length)
 
-            # Per trajectory
-            for i, data in enumerate(datas):
+                print(f'{scene_name}_{method}', np.array(num_facets).mean())
 
-                # If the trajectory wasn't feasible to solve, we don't store any data on it besides the success.
-                if not data['feasible']:
-                    success.append(False)
-                    continue
+            elif method == 'splatplan':
+                col = '#4285F4'
+                linewidth=3
 
-                else:
-                    success.append(True)
+                success = []
+                safety = []
+                polytope_safety = []
+                times = []
+                polytope_vols = []
+                polytope_radii = []
+                eccentricity = []
+                path_length = []
 
-                num_polytopes = data['num_polytopes']
+                num_facets = []
 
-                # record the times
-                traj_time = np.array([data['times_astar'], data['times_collision_set'],
-                                    data['times_polytope'], data['times_opt']])
-                times.append(traj_time)
-                
-                # record the min safety margin
-                safety.append(np.array(data['safety_margin']).min())
-                polytope_safety.append(np.array(data['polytope_margin']).min())
-                path_length.append(data['path_length'])
+                # Per trajectory
+                for i, data in enumerate(datas):
 
-                # record the polytope stats (min/max/mean/std)
-                polytope_vols_entry = np.array(data['polytope_vols'])
-                polytope_radii_entry = np.array(data['polytope_radii'])
+                    # If the trajectory wasn't feasible to solve, we don't store any data on it besides the success.
+                    if not data['feasible']:
+                        success.append(False)
+                        continue
 
-                polytope_vols.append([polytope_vols_entry.min(), polytope_vols_entry.max(), polytope_vols_entry.mean(), polytope_vols_entry.std()])
-                polytope_radii.append([polytope_radii_entry.min(), polytope_radii_entry.max(), polytope_radii_entry.mean(), polytope_radii_entry.std()])
-                
-                polytope_length = np.array([len(np.array(poly)) for poly in data['polytopes']]).mean()
+                    else:
+                        success.append(True)
 
-                num_facets.append(polytope_length)
+                    num_polytopes = data['num_polytopes']
 
-            success = np.array(success)
-            safety = np.array(safety)
-            polytope_safety = np.array(polytope_safety)
-            times = np.array(times)
-            polytope_vols = np.array(polytope_vols)
-            polytope_radii = np.array(polytope_radii)
-            path_length = np.array(path_length)
+                    # record the times
+                    traj_time = np.array([data['times_astar'], data['times_collision_set'],
+                                        data['times_polytope'], data['times_opt']])
+                    times.append(traj_time)
+                    
+                    # record the min safety margin
+                    safety.append(np.array(data['safety_margin']).min())
+                    polytope_safety.append(np.array(data['polytope_margin']).min())
+                    path_length.append(data['path_length'])
 
-            print(f'{scene_name}_{method}', np.array(num_facets).mean())
+                    # record the polytope stats (min/max/mean/std)
+                    polytope_vols_entry = np.array(data['polytope_vols'])
+                    polytope_radii_entry = np.array(data['polytope_radii'])
 
-        # elif method == 'rrt':
-        #     col = '#FBBc05'
-        #     linewidth=3
+                    polytope_eccentricity = (4/3 * np.pi * (polytope_radii_entry**3)) / polytope_vols_entry
 
-        # elif method == 'nerf-nav':
-        #     col = '#EA4335'
-        #     linewidth=3
+                    polytope_vols.append([polytope_vols_entry.min(), polytope_vols_entry.max(), polytope_vols_entry.mean(), polytope_vols_entry.std()])
+                    polytope_radii.append([polytope_radii_entry.min(), polytope_radii_entry.max(), polytope_radii_entry.mean(), polytope_radii_entry.std()])
+                    eccentricity.append([polytope_eccentricity.min(), polytope_eccentricity.max(), polytope_eccentricity.mean(), polytope_eccentricity.std()])
 
-        print(f'{scene_name}_{method}')
+                    polytope_length = np.array([len(np.array(poly)) for poly in data['polytopes']]).mean()
 
-        # Computation Time
+                    num_facets.append(polytope_length)
 
-        # TODO: This plots the individual times of each component of the algorithm
-        # ax[0, 0].bar(k + 0.75*j/len(methods) + 0.25/2, qp_solve_time.mean(), bottom = 0, width=0.15, color= adjust_lightness(col, 0.5), linewidth=3, ec='k', label='qp')
-        # ax[0, 0].bar(k + 0.75*j/len(methods) + 0.25/2, cbf_solve_time.mean(), bottom=qp_solve_time.mean(), width=0.15, color=adjust_lightness(col, 1.0), linewidth=3, ec='k', label='cbf')
-        # ax[0, 0].bar(k + 0.75*j/len(methods) + 0.25/2, prune_time.mean(), bottom=cbf_solve_time.mean() + qp_solve_time.mean(), width=0.15, color = adjust_lightness(col, 1.), linewidth=3, hatch='x', ec='k', label='prune')
-        # ax[0, 0].bar(k + 0.75*j/len(methods) + 0.25/2, prune_time.mean() + cbf_solve_time.mean() + qp_solve_time.mean(), width=0.15, color = adjust_lightness(col, 1.), linewidth=3,  ec='k', label='prune')
+                success = np.array(success)
+                safety = np.array(safety)
+                polytope_safety = np.array(polytope_safety)
+                times = np.array(times)
+                polytope_vols = np.array(polytope_vols)
+                polytope_radii = np.array(polytope_radii)
+                eccentricity = np.array(eccentricity)
+                path_length = np.array(path_length)
 
-        # TODO: This plots just the total time
-        ax[0, 0].bar(k + 0.75*j/len(methods) + 0.25/2, times.sum(axis=1).mean(), width=0.15, color=col, capsize=10, edgecolor='black', linewidth=linewidth, 
-                    linestyle='-', joinstyle='round', rasterized=True)
+                print(f'{scene_name}_{method}', np.array(num_facets).mean())
 
-        # Safety Margin
-        # For trajectory points
-        # errors = np.abs(safety.mean().reshape(-1, 1) - np.array([safety.min(), safety.max()]).reshape(-1, 1))
+            # elif method == 'rrt':
+            #     col = '#FBBc05'
+            #     linewidth=3
 
-        # ax[0, 1].errorbar(k + 0.75*j/len(methods) + 0.25/2, safety.mean().reshape(-1, 1), yerr=errors, color=adjust_lightness(col, 0.5), markeredgewidth=5, capsize=15, elinewidth=5, alpha=0.5)
-        # ax[0, 1].scatter( np.repeat((k + 0.75*j/len(methods) + 0.25/2), len(safety)), safety, s=250, color=col, alpha=0.04)
-        # ax[0, 1].scatter(k +  + 0.75*j/len(methods) + 0.25/2 - 0.13, safety.mean(), s=200, color=col, alpha=1, marker='>')
+            # elif method == 'nerf-nav':
+            #     col = '#EA4335'
+            #     linewidth=3
+
+            print(f'{scene_name}_{method}')
+
+            # Computation Time
+
+            # TODO: This plots the individual times of each component of the algorithm
+            # ax[0, 0].bar(k + 0.75*j/len(methods) + 0.25/2, qp_solve_time.mean(), bottom = 0, width=0.15, color= adjust_lightness(col, 0.5), linewidth=3, ec='k', label='qp')
+            # ax[0, 0].bar(k + 0.75*j/len(methods) + 0.25/2, cbf_solve_time.mean(), bottom=qp_solve_time.mean(), width=0.15, color=adjust_lightness(col, 1.0), linewidth=3, ec='k', label='cbf')
+            # ax[0, 0].bar(k + 0.75*j/len(methods) + 0.25/2, prune_time.mean(), bottom=cbf_solve_time.mean() + qp_solve_time.mean(), width=0.15, color = adjust_lightness(col, 1.), linewidth=3, hatch='x', ec='k', label='prune')
+            # ax[0, 0].bar(k + 0.75*j/len(methods) + 0.25/2, prune_time.mean() + cbf_solve_time.mean() + qp_solve_time.mean(), width=0.15, color = adjust_lightness(col, 1.), linewidth=3,  ec='k', label='prune')
+
+            # TODO: This plots just the total time
+            ax[0, 0].bar(k + 0.75*j/len(methods) + 0.25/2 + l/10, times.sum(axis=1).mean(), width=0.15, color=col, capsize=10, edgecolor='black', linewidth=linewidth, 
+                        linestyle='-', joinstyle='round', rasterized=True)
+
+            # Safety Margin
+            # For trajectory points
+            # errors = np.abs(safety.mean().reshape(-1, 1) - np.array([safety.min(), safety.max()]).reshape(-1, 1))
+
+            # ax[0, 1].errorbar(k + 0.75*j/len(methods) + 0.25/2, safety.mean().reshape(-1, 1), yerr=errors, color=adjust_lightness(col, 0.5), markeredgewidth=5, capsize=15, elinewidth=5, alpha=0.5)
+            # ax[0, 1].scatter( np.repeat((k + 0.75*j/len(methods) + 0.25/2), len(safety)), safety, s=250, color=col, alpha=0.04)
+            # ax[0, 1].scatter(k +  + 0.75*j/len(methods) + 0.25/2 - 0.13 + l/10, safety.mean(), s=200, color=col, alpha=1, marker='>')
+            ax[0, 1].scatter(k +  + 0.75*j/len(methods) + 0.25/2 + l/10, safety.mean(), s=200, color='k', alpha=1, marker='x')
+            violinplot = ax[0, 1].violinplot(safety, positions=[k + 0.75*j/len(methods) + 0.25/2 + l/10], widths=0.1, showmeans=False, showextrema=False, showmedians=False)
+
+            for pc in violinplot['bodies']:
+                # pc.set_facecolor(col)
+                # pc.set_edgecolor('black')
+                # pc.set_alpha(1)
+                pc.set_color(col)
+                pc.set_alpha(0.8)
+
+            # For polytope vertices
+            # errors = np.abs(polytope_safety.mean().reshape(-1, 1) - np.array([polytope_safety.min(), polytope_safety.max()]).reshape(-1, 1))
+
+            # ax[1, 0].errorbar(k + 0.75*j/len(methods) + 0.25/2, polytope_safety.mean().reshape(-1, 1), yerr=errors, color=adjust_lightness(col, 0.5), markeredgewidth=5, capsize=15, elinewidth=5, alpha=0.5)
+            # ax[1, 0].scatter( np.repeat((k + 0.75*j/len(methods) + 0.25/2), len(polytope_safety)), polytope_safety, s=250, color=col, alpha=0.04)
+            # ax[1, 0].scatter(k +  + 0.75*j/len(methods) + 0.25/2 - 0.13, polytope_safety.mean(), s=200, color=col, alpha=1, marker='>')
+
+            ax[1, 0].scatter(k +  + 0.75*j/len(methods) + 0.25/2 + l/10, polytope_safety.mean(), s=200, color='k', alpha=1, marker='x')
+            violinplot = ax[1, 0].violinplot(polytope_safety, positions=[k + 0.75*j/len(methods) + 0.25/2 + l/10], widths=0.1, showmeans=False, showextrema=False, showmedians=False)
+
+            for pc in violinplot['bodies']:
+                # pc.set_facecolor(col)
+                # pc.set_edgecolor('black')
+                # pc.set_alpha(1)
+                pc.set_color(col)
+                pc.set_alpha(0.8)
+
+            # # Polytope Volume
+            # errors = np.abs(polytope_vols[:, 2].mean().reshape(-1, 1) - np.array([polytope_vols[:, 0].min(), polytope_vols[:, 1].max()]).reshape(-1, 1))
+
+            # ax[1, 0].errorbar(k + 0.75*j/len(methods) + 0.25/2, polytope_vols[:, 2].mean().reshape(-1, 1), yerr=errors, color=adjust_lightness(col, 0.5), markeredgewidth=5, capsize=15, elinewidth=5, alpha=0.5)
+            # ax[1, 0].scatter( np.repeat((k + 0.75*j/len(methods) + 0.25/2), len(polytope_vols[:, 2])), polytope_vols[:, 2], s=250, color=col, alpha=0.04)
+            # ax[1, 0].scatter(k +  + 0.75*j/len(methods) + 0.25/2 - 0.13, polytope_vols[:, 2].mean(), s=200, color=col, alpha=1, marker='>')
+
+            ax[1, 1].scatter(k +  + 0.75*j/len(methods) + 0.25/2 + l/10, polytope_vols[:, 2].mean(), s=200, color='k', alpha=1, marker='x')
+            violinplot = ax[1, 1].violinplot(polytope_vols[:, 2], positions=[k + 0.75*j/len(methods) + 0.25/2 + l/10], widths=0.1, showmeans=False, showextrema=False, showmedians=False)
+
+            for pc in violinplot['bodies']:
+                # pc.set_facecolor(col)
+                # pc.set_edgecolor('black')
+                # pc.set_alpha(1)
+                pc.set_color(col)
+                pc.set_alpha(0.8)
+
+            # # Polytope Radii
+            # errors = np.abs(polytope_radii[:, 2].mean().reshape(-1, 1) - np.array([polytope_radii[:, 0].min(), polytope_radii[:, 1].max()]).reshape(-1, 1))
+
+            # ax[1, 1].errorbar(k + 0.75*j/len(methods) + 0.25/2, polytope_radii[:, 2].mean().reshape(-1, 1), yerr=errors, color=adjust_lightness(col, 0.5), markeredgewidth=5, capsize=15, elinewidth=5, alpha=0.5)
+            # ax[1, 1].scatter( np.repeat((k + 0.75*j/len(methods) + 0.25/2), len(polytope_radii[:, 2])), polytope_radii[:, 2], s=250, color=col, alpha=0.04)
+            # ax[1, 1].scatter(k +  + 0.75*j/len(methods) + 0.25/2 - 0.13, polytope_radii[:, 2].mean(), s=200, color=col, alpha=1, marker='>')
+
+            # Eccentricity
+            # errors = np.abs(eccentricity[:, 2].mean().reshape(-1, 1) - np.array([eccentricity[:, 0].min(), eccentricity[:, 1].max()]).reshape(-1, 1))
             
-        # For polytope vertices
-        errors = np.abs(polytope_safety.mean().reshape(-1, 1) - np.array([polytope_safety.min(), polytope_safety.max()]).reshape(-1, 1))
+            # ax[1, 1].errorbar(k + 0.75*j/len(methods) + 0.25/2, eccentricity[:, 2].mean().reshape(-1, 1), yerr=errors, color=adjust_lightness(col, 0.5), markeredgewidth=5, capsize=15, elinewidth=5, alpha=0.5)
+            # ax[1, 1].scatter( np.repeat((k + 0.75*j/len(methods) + 0.25/2), len(eccentricity[:, 2])), eccentricity[:, 2], s=250, color=col, alpha=0.04)
+            # ax[1, 1].scatter(k +  + 0.75*j/len(methods) + 0.25/2 - 0.13, eccentricity[:, 2].mean(), s=200, color=col, alpha=1, marker='>')
 
-        ax[0, 1].errorbar(k + 0.75*j/len(methods) + 0.25/2, polytope_safety.mean().reshape(-1, 1), yerr=errors, color=adjust_lightness(col, 0.5), markeredgewidth=5, capsize=15, elinewidth=5, alpha=0.5)
-        ax[0, 1].scatter( np.repeat((k + 0.75*j/len(methods) + 0.25/2), len(polytope_safety)), polytope_safety, s=250, color=col, alpha=0.04)
-        ax[0, 1].scatter(k +  + 0.75*j/len(methods) + 0.25/2 - 0.13, polytope_safety.mean(), s=200, color=col, alpha=1, marker='>')
+            # ax[1, 1].scatter(k +  + 0.75*j/len(methods) + 0.25/2 + l/10, eccentricity[:, 2].mean(), s=200, color='k', alpha=1, marker='x')
+            # violinplot = ax[1, 1].violinplot(eccentricity[:, 2], positions=[k + 0.75*j/len(methods) + 0.25/2 + l/10], widths=0.1, showmeans=False, showextrema=False, showmedians=False)
 
-        # Polytope Volume
-        errors = np.abs(polytope_vols[:, 2].mean().reshape(-1, 1) - np.array([polytope_vols[:, 0].min(), polytope_vols[:, 1].max()]).reshape(-1, 1))
+            # for pc in violinplot['bodies']:
+            #     # pc.set_facecolor(col)
+            #     # pc.set_edgecolor('black')
+            #     # pc.set_alpha(1)
+            #     pc.set_color(col)
+            #     pc.set_alpha(0.8)
 
-        ax[1, 0].errorbar(k + 0.75*j/len(methods) + 0.25/2, polytope_vols[:, 2].mean().reshape(-1, 1), yerr=errors, color=adjust_lightness(col, 0.5), markeredgewidth=5, capsize=15, elinewidth=5, alpha=0.5)
-        ax[1, 0].scatter( np.repeat((k + 0.75*j/len(methods) + 0.25/2), len(polytope_vols[:, 2])), polytope_vols[:, 2], s=250, color=col, alpha=0.04)
-        ax[1, 0].scatter(k +  + 0.75*j/len(methods) + 0.25/2 - 0.13, polytope_vols[:, 2].mean(), s=200, color=col, alpha=1, marker='>')
+            # Path Length
+            # errors = np.abs(path_length.mean().reshape(-1, 1) - np.array([path_length.min(), path_length.max()]).reshape(-1, 1))
 
-        # Polytope Radii
-        errors = np.abs(polytope_radii[:, 2].mean().reshape(-1, 1) - np.array([polytope_radii[:, 0].min(), polytope_radii[:, 1].max()]).reshape(-1, 1))
+            # ax[2, 0].errorbar(k + 0.75*j/len(methods) + 0.25/2, path_length.mean().reshape(-1, 1), yerr=errors, color=adjust_lightness(col, 0.5), markeredgewidth=5, capsize=15, elinewidth=5, alpha=0.5)
+            # ax[2, 0].scatter( np.repeat((k + 0.75*j/len(methods) + 0.25/2), len(path_length)), path_length, s=250, color=col, alpha=0.04)
+            # ax[2, 0].scatter(k +  + 0.75*j/len(methods) + 0.25/2 - 0.13, path_length.mean(), s=200, color=col, alpha=1, marker='>')
 
-        ax[1, 1].errorbar(k + 0.75*j/len(methods) + 0.25/2, polytope_radii[:, 2].mean().reshape(-1, 1), yerr=errors, color=adjust_lightness(col, 0.5), markeredgewidth=5, capsize=15, elinewidth=5, alpha=0.5)
-        ax[1, 1].scatter( np.repeat((k + 0.75*j/len(methods) + 0.25/2), len(polytope_radii[:, 2])), polytope_radii[:, 2], s=250, color=col, alpha=0.04)
-        ax[1, 1].scatter(k +  + 0.75*j/len(methods) + 0.25/2 - 0.13, polytope_radii[:, 2].mean(), s=200, color=col, alpha=1, marker='>')
+            ax[2, 0].scatter(k +  + 0.75*j/len(methods) + 0.25/2 + l/10, path_length.mean(), s=200, color='k', alpha=1, marker='x')
+            violinplot = ax[2, 0].violinplot(path_length, positions=[k + 0.75*j/len(methods) + 0.25/2 + l/10], widths=0.1, showmeans=False, showextrema=False, showmedians=False)
 
-        # Path Length
-        errors = np.abs(path_length.mean().reshape(-1, 1) - np.array([path_length.min(), path_length.max()]).reshape(-1, 1))
+            for pc in violinplot['bodies']:
+                # pc.set_facecolor(col)
+                # pc.set_edgecolor('black')
+                # pc.set_alpha(1)
+                pc.set_color(col)
+                pc.set_alpha(0.8)
 
-        ax[2, 0].errorbar(k + 0.75*j/len(methods) + 0.25/2, path_length.mean().reshape(-1, 1), yerr=errors, color=adjust_lightness(col, 0.5), markeredgewidth=5, capsize=15, elinewidth=5, alpha=0.5)
-        ax[2, 0].scatter( np.repeat((k + 0.75*j/len(methods) + 0.25/2), len(path_length)), path_length, s=250, color=col, alpha=0.04)
-        ax[2, 0].scatter(k +  + 0.75*j/len(methods) + 0.25/2 - 0.13, path_length.mean(), s=200, color=col, alpha=1, marker='>')
-
-        # Success Rate
-        ax[2, 1].bar(k + 0.75*j/len(methods) + 0.25/2, success.sum()/len(success), width=0.15, color=col, capsize=10, edgecolor='black', linewidth=linewidth, 
-                    linestyle='-', joinstyle='round', rasterized=True)
+            # Success Rate
+            ax[2, 1].bar(k + 0.75*j/len(methods) + 0.25/2 + l/10, (1 - success.sum()/len(success)), width=0.15, color=col, capsize=10, edgecolor='black', linewidth=linewidth, 
+                        linestyle='-', joinstyle='round', rasterized=True)
 
 # COMPUTATION TIME
-ax[0, 0].set_title(r'Computation Time (s) $\downarrow$' , fontsize=25, fontweight='bold')
+ax[0, 0].set_title(r'Computation Time (s) $\downarrow$' , fontsize=20, fontweight='bold')
 ax[0, 0].get_xaxis().set_visible(False)
-ax[0, 0].grid(axis='y', linewidth=2, color='k', linestyle='--', alpha=0.5, zorder=0)
+ax[0, 0].grid(axis='y', linewidth=2, color='k', linestyle='--', alpha=0.25, zorder=0)
 ax[0, 0].set_axisbelow(True)
 for location in ['left', 'right', 'top', 'bottom']:
     ax[0, 0].spines[location].set_linewidth(4)
 # ax[0,0].set_yscale('log')
 
 # SAFETY MARGIN
-ax[0, 1].set_title('Minimum Distance', fontsize=25, fontweight='bold')
+ax[0, 1].set_title('Min. Distance (Traj)', fontsize=20, fontweight='bold')
 ax[0, 1].get_xaxis().set_visible(False)
 ax[0, 1].axhline(y = 0., color = 'k', linestyle = '--', linewidth=3, alpha=0.7, zorder=0) 
-ax[0, 1].grid(axis='y', linewidth=2, color='k', linestyle='--', alpha=0.5, zorder=0)
+ax[0, 1].grid(axis='y', linewidth=2, color='k', linestyle='--', alpha=0.25, zorder=0)
 ax[0, 1].set_axisbelow(True)
 for location in ['left', 'right', 'top', 'bottom']:
     ax[0, 1].spines[location].set_linewidth(4)
-ax[0, 1].set_ylim(-0.0015, 0.00015)
+#ax[0, 1].set_ylim(-0.0015, 0.00015)
+
+# # POLYTOPE VOLUME
+# ax[1, 0].set_title(r'Polytope Volume $\uparrow$', fontsize=25, fontweight='bold')
+# ax[1, 0].get_xaxis().set_visible(False)
+# ax[1, 0].grid(axis='y', linewidth=2, color='k', linestyle='--', alpha=0.5, zorder=0)
+# ax[1, 0].set_axisbelow(True)
+# for location in ['left', 'right', 'top', 'bottom']:
+#     ax[1, 0].spines[location].set_linewidth(4)
+
+# # POLYTOPE RADII
+# ax[1, 1].set_title(r'Polytope Radius $\uparrow$', fontsize=25, fontweight='bold')
+# ax[1, 1].get_xaxis().set_visible(False)
+# ax[1, 1].grid(axis='y', linewidth=2, color='k', linestyle='--', alpha=0.5, zorder=0)
+# ax[1, 1].set_axisbelow(True)
+# for location in ['left', 'right', 'top', 'bottom']:
+#     ax[1, 1].spines[location].set_linewidth(4)
 
 # POLYTOPE VOLUME
-ax[1, 0].set_title(r'Polytope Volume $\uparrow$', fontsize=25, fontweight='bold')
+ax[1, 0].set_title(r'Min. Distance (Vertices)', fontsize=20, fontweight='bold')
 ax[1, 0].get_xaxis().set_visible(False)
-ax[1, 0].grid(axis='y', linewidth=2, color='k', linestyle='--', alpha=0.5, zorder=0)
+ax[1, 0].grid(axis='y', linewidth=2, color='k', linestyle='--', alpha=0.25, zorder=0)
 ax[1, 0].set_axisbelow(True)
 for location in ['left', 'right', 'top', 'bottom']:
     ax[1, 0].spines[location].set_linewidth(4)
 
-# POLYTOPE RADII
-ax[1, 1].set_title(r'Polytope Radius $\uparrow$', fontsize=25, fontweight='bold')
+# POLYTOPE Volume
+ax[1, 1].set_title(r'Polytope Volume $\uparrow$', fontsize=20, fontweight='bold')
 ax[1, 1].get_xaxis().set_visible(False)
-ax[1, 1].grid(axis='y', linewidth=2, color='k', linestyle='--', alpha=0.5, zorder=0)
+ax[1, 1].grid(axis='y', linewidth=2, color='k', linestyle='--', alpha=0.25, zorder=0)
 ax[1, 1].set_axisbelow(True)
 for location in ['left', 'right', 'top', 'bottom']:
     ax[1, 1].spines[location].set_linewidth(4)
 
 # PATH LENGTH
-ax[2, 0].set_title(r'Path Length $\downarrow$', fontsize=25, fontweight='bold')
+ax[2, 0].set_title(r'Path Length $\downarrow$', fontsize=20, fontweight='bold')
 ax[2, 0].get_xaxis().set_visible(False)
-ax[2, 0].grid(axis='y', linewidth=2, color='k', linestyle='--', alpha=0.5, zorder=0)
+ax[2, 0].grid(axis='y', linewidth=2, color='k', linestyle='--', alpha=0.25, zorder=0)
 ax[2, 0].set_axisbelow(True)
 for location in ['left', 'right', 'top', 'bottom']:
     ax[2, 0].spines[location].set_linewidth(4)
 
 # SUCCESS RATE
-ax[2, 1].set_title(r'Success Rate $\uparrow$', fontsize=25, fontweight='bold')
+ax[2, 1].set_title(r'Failure Rate $\downarrow$', fontsize=20, fontweight='bold')
 ax[2, 1].get_xaxis().set_visible(False)
-ax[2, 1].grid(axis='y', linewidth=2, color='k', linestyle='--', alpha=0.5, zorder=0)
+ax[2, 1].grid(axis='y', linewidth=2, color='k', linestyle='--', alpha=0.25, zorder=0)
 ax[2, 1].set_axisbelow(True)
 for location in ['left', 'right', 'top', 'bottom']:
     ax[2, 1].spines[location].set_linewidth(4)
+# Log plot in y
+# ax[2, 1].set_yscale('log')
 
 plt.savefig(f'simulation_stats.png', dpi=500)
 

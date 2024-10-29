@@ -17,7 +17,6 @@ class Corridor():
     def __init__(self, gsplat, robot_config, env_config, spline_planner, device) -> None:
         # Rs is the radius around the path, determined by the max velocity and acceleration of the robot.
 
-
         self.gsplat = gsplat
         self.device = device
         self.env_config = env_config

@@ -15,10 +15,10 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # method = 'sfc'
 ### ----------------- Possible Distance Types ----------------- ###
 
-sparse = True
+sparse = False
 
 for scene_name in ['statues', 'old_union', 'flight']: #['stonehenge', 'statues', 'flight', 'old_union']:
-    for method in ['splatplan']:
+    for method in ['sfc']:
 
         # NOTE: POPULATE THE UPPER AND LOWER BOUNDS FOR OTHER SCENES!!!
         if scene_name == 'old_union':
@@ -126,7 +126,13 @@ for scene_name in ['statues', 'old_union', 'flight']: #['stonehenge', 'statues',
         # Load file
         current_path = Path.cwd()  # Get the current working directory as a Path object
         parent_path = current_path.parent  # Get the parent directory
-        with open( os.path.join(str(parent_path), f'trajs/{scene_name}_{method}.json'), 'r') as f:
+
+        if sparse:
+            save_path = f'trajs/{scene_name}_sparse_{method}.json'
+        else:
+            save_path = f'trajs/{scene_name}_{method}.json'
+        
+        with open( os.path.join(str(parent_path), save_path), 'r') as f:
             meta = json.load(f)
 
         # Load in the data
@@ -161,7 +167,6 @@ for scene_name in ['statues', 'old_union', 'flight']: #['stonehenge', 'statues',
             polytope_radii = []
 
             polytope_margin = []
-
             for poly in polytopes:
 
                 poly = np.array(poly)
@@ -195,8 +200,13 @@ for scene_name in ['statues', 'old_union', 'flight']: #['stonehenge', 'statues',
 
         meta['total_data'] = total_data_processed
 
+        if sparse:
+            write_path = f'trajs/{scene_name}_sparse_{method}_processed.json'
+        else:
+            write_path = f'trajs/{scene_name}_{method}_processed.json'
+
         # Save the data
-        with open( os.path.join(str(parent_path), f'trajs/{scene_name}_{method}_processed.json'), 'w') as f:
+        with open( os.path.join(str(parent_path), write_path), 'w') as f:
             json.dump(meta, f, indent=4)
 
 #%%

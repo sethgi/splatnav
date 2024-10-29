@@ -8,7 +8,7 @@ import time
 
 from polytopes.polytopes_utils import h_rep_minimal, find_interior, compute_segment_in_polytope
 from initialization.grid_utils import GSplatVoxel
-from polytopes.collision_set import GSplatCollisionSet
+from polytopes.collision_set import GSplatCollisionSet, ellipsoid_halfspace_intersection
 from polytopes.decomposition import compute_polytope
 from ellipsoids.intersection_utils import compute_intersection_linear_motion
 
@@ -104,7 +104,7 @@ class SplatPlan():
 
         # Step 4: Perform Bezier spline optimization
         tnow = time.time()
-        traj, feasible = self.spline_planner.optimize_b_spline(polytopes, x0, xf)
+        traj, feasible = self.spline_planner.optimize_b_spline(polytopes, segments[0][0], segments[-1][-1])
         if not feasible:
             traj = torch.stack([x0, xf], dim=0)
 
@@ -128,6 +128,8 @@ class SplatPlan():
             'feasible': feasible
         }
 
+        # self.save_polytope(polytopes, 'feasible.obj')
+        
         return traj_data
     
     def get_polytope_from_outputs(self, data):
@@ -144,10 +146,12 @@ class SplatPlan():
 
         if len(gs_ids) == 0:
             return (A_bb, b_bb)
+        
         elif len(gs_ids) == 1:
-            rots = data['rots'].expand(2, -1, -1)
-            scales = data['scales'].expand(2, -1)
-            means = data['means'].expand(2, -1)
+            rots = data['rots']
+            scales = data['scales']
+            means = data['means']
+
         else:
             rots = data['rots']
             scales = data['scales']
@@ -160,17 +164,8 @@ class SplatPlan():
 
         # With the intersections computed, we can iterate through them and keep a minimal amount of halfspaces
 
-        # A = []
-        # b = []
-
-        # output = {
-        #     'seedpoint': x_opt,
-        #     'deltas': deltas,
-        #     'Q_opt': Q_opt,
-        #     'K_opt': K_opt,
-        #     'mu_A': mu_A,
-        #     'is_not_intersect': is_not_intersect
-        # }
+        A = []
+        b = []
 
         # Loop until we have no more Gaussian intersections.
         # The idea here is very similar to that done in SFC. For them, they use the Mahalanobis distance to scale their ellipsoid until it 
@@ -178,9 +173,51 @@ class SplatPlan():
 
         # Instead, we use K_opt as this scaling factor, calculate the halfplane, then inflate the halfplane by the radius of the robot. If the halfplane
         # does not contain these ellipsoids, then we can safely ignore them. If it does, then we keep them in the queue.
-        #while :
-        # Compute the polytope
-        A, b, _ = compute_polytope(intersection_output['deltas'], intersection_output['Q_opt'], intersection_output['K_opt'], intersection_output['mu_A'])
+
+        deltas = intersection_output['deltas']
+        Q_opt = intersection_output['Q_opt']
+        K_opt = intersection_output['K_opt']
+        mu_A = intersection_output['mu_A']
+
+        if K_opt.numel() == 1:
+            A_cut, b_cut, _ = compute_polytope(deltas, Q_opt.unsqueeze(0), K_opt.unsqueeze(0), mu_A)
+            A.append(A_cut)
+            b.append(b_cut)
+
+        else:
+            while len(K_opt) > 0:
+            
+                # Find the minimum distance point
+                min_K, min_idx = torch.min(K_opt, dim=0)
+
+                # Compute the halfspace for the min distance ellipsoid
+                A_cut, b_cut, _ = compute_polytope(deltas[min_idx].unsqueeze(0), Q_opt[min_idx].unsqueeze(0), min_K.unsqueeze(0), mu_A[min_idx].unsqueeze(0))
+    
+                # Find all ellipsoids that are inside the halfspace. Remember that this halfspace is inflated!
+                A_cut_inflated = A_cut / torch.linalg.norm(A_cut, dim=-1, keepdim=True)
+                b_cut_inflated = b_cut / torch.linalg.norm(A_cut, dim=-1)
+                b_cut_inflated = b_cut_inflated + self.radius
+
+                keep_gaussians = ellipsoid_halfspace_intersection(means, rots, scales, A_cut_inflated.unsqueeze(0), b_cut_inflated)
+
+                # Keep track of the mask with segmented out ellipsoids and the min distance point!
+                keep_gaussians[min_idx] = False
+
+                # TODO: I think means is the same as mu_A, so we can remove one of them.
+                deltas = deltas[keep_gaussians]
+                Q_opt = Q_opt[keep_gaussians]
+                K_opt = K_opt[keep_gaussians]
+                mu_A = mu_A[keep_gaussians]
+                rots = rots[keep_gaussians]
+                scales = scales[keep_gaussians]
+                means = means[keep_gaussians]
+
+                # Append the halfspace to the list
+                A.append(A_cut)
+                b.append(b_cut)
+
+        A = torch.stack(A, dim=0).reshape(-1, deltas.shape[-1])
+        b = torch.stack(b, dim=0).reshape(-1, )
 
         # The full polytope is a concatenation of the intersection polytope and the bounding box polytope
         A = torch.cat([A, A_bb], dim=0)

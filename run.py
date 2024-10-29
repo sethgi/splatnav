@@ -28,7 +28,7 @@ config_path_base = 'configs'
 os.makedirs(config_path_base, exist_ok=True)
 
 # Using sparse representation?
-sparse = True
+sparse = False
 
 ### ----------------- Possible Methods ----------------- ###
 # method = 'splatplan'
@@ -37,7 +37,7 @@ sparse = True
 ### ----------------- Possible Distance Types ----------------- ###
 
 for scene_name in ['flight', 'statues', 'old_union']: #['stonehenge', 'statues', 'flight', 'old_union']:
-    for method in ['splatplan']:
+    for method in ['sfc']:
 
         # NOTE: POPULATE THE UPPER AND LOWER BOUNDS FOR OTHER SCENES!!!
         if scene_name == 'old_union':
@@ -207,7 +207,6 @@ for scene_name in ['flight', 'statues', 'old_union']: #['stonehenge', 'statues',
             'upper_bound': upper_bound.tolist(),
             'resolution': resolution,
             'n_steps': n_steps,
-            'n_time': n_t,
             'total_data': total_data,
         }
 
@@ -219,8 +218,8 @@ for scene_name in ['flight', 'statues', 'old_union']: #['stonehenge', 'statues',
             save_path = f'trajs/{scene_name}_sparse_{method}.json'
         else:
             save_path = f'trajs/{scene_name}_{method}.json'
-
+        
         with open(save_path, 'w') as f:
             json.dump(data, f, indent=4)
-
+        
 # %%
