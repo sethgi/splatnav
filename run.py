@@ -37,7 +37,7 @@ sparse = False
 ### ----------------- Possible Distance Types ----------------- ###
 
 for scene_name in ['flight', 'statues', 'old_union']: #['stonehenge', 'statues', 'flight', 'old_union']:
-    for method in ['sfc']:
+    for method in ['splatplan']:
 
         # NOTE: POPULATE THE UPPER AND LOWER BOUNDS FOR OTHER SCENES!!!
         if scene_name == 'old_union':
