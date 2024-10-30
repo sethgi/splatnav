@@ -61,6 +61,8 @@ class ControlNode(Node):
         # Set the map name for visualization in RVIZ
         self.map_name = "camera_link"
 
+        self.mode = mode
+
         # Subscribe to the estimated pose topic. In open-loop experiments, this is not used. In the closed-loop experiments,
         # this can be from the VIO or from Splat-Loc.
         # Subscribe to the odometry topic
@@ -92,9 +94,9 @@ class ControlNode(Node):
         self.goal_publisher = self.create_publisher(PoseStamped, "/goal_pose", 10)
         self.goal_timer = self.create_timer(1.0, self.goal_callback)
 
-        if mode == 'closed-loop':
-            # This is the timer that triggers replanning
-            self.replan_timer = self.create_timer(1.0, self.replan)
+        # if mode == 'closed-loop':
+        #     # This is the timer that triggers replanning
+        #     self.replan_timer = self.create_timer(1.0, self.replan)
 
         ### Initialize variables  ###
         self.fmu_pos = [0.0, 0.0, 0.0]
@@ -158,12 +160,16 @@ class ControlNode(Node):
         # Publishes the trajectory as a Pose Array
         self.trajectory_publisher = self.create_publisher(PoseArray, "/trajectory", 10)
         self.trajectory_timer = self.create_timer(1.0, self.trajectory_callback)
+        self.traj = None
 
         print("SplatPlan Initialized...")
 
     def trajectory_callback(self):
-        traj = self.plan_path(self.position_output, self.goal)
-        traj_numpy = np.array(traj)
+        if self.traj is None or self.mode == 'closed-loop':
+            traj, output = self.plan_path(self.position_output, self.goal)
+
+            # NOTE: !!! self.traj is the np array of traj( a list)
+            self.traj = np.array(traj)
 
         print('Start:', traj[0])
         print('Goal:', traj[-1])
@@ -171,14 +177,14 @@ class ControlNode(Node):
         poses = []
         yaw = 0.0
 
-        for idx, pt in enumerate(traj_numpy):
+        for idx, pt in enumerate(self.traj):
             msg = Pose()
             # msg.header.frame_id = self.map_name
             msg.position.x, msg.position.y, msg.position.z = pt[0], pt[1], pt[2]
 
-            if idx < len(traj) - 1:
+            if idx < len(self.traj) - 1:
 
-                diff = traj_numpy[idx + 1] - traj_numpy[idx]
+                diff = self.traj[idx + 1] - self.traj[idx]
 
                 prev_yaw = yaw
                 yaw = np.arctan2(diff[1], diff[0])
@@ -316,10 +322,8 @@ class ControlNode(Node):
         #     'times_opt': times_opt,
         #     'feasible': feasible
         # }
-        
-        self.traj = output['traj']
 
-        return output['traj']
+        return output['traj'], output
     
     ### THIS CODE FUNCTION IS A MESS ###
     # def replan(self):
