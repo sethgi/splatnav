@@ -3,20 +3,18 @@ import os
 import torch
 from pathlib import Path    
 import time
-import pickle 
 import numpy as np
-from tqdm import tqdm
-import json
-from SFC.corridor_utils import Corridor
 from splat.splat_utils import GSplatLoader
 from splatplan.splatplan import SplatPlan
 from splatplan.spline_utils import SplinePlanner
-
 
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Joy
 from std_msgs.msg import Float32MultiArray
+from std_msgs.msg import Header, String
+from sensor_msgs.msg import PointCloud2, PointField
+from geometry_msgs.msg import PoseStamped, Pose, PoseArray
 from px4_msgs.msg import VehicleOdometry  # Adjusted to use the PX4-specific odometry message
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
@@ -30,10 +28,13 @@ import select
 import tty
 import termios
 
+from ros_utils import make_point_cloud
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 class ControlNode(Node):
 
-    def __init__(self):
+    def __init__(self, mode='open-loop'):
         super().__init__('control_node')
         
         qos_profile = QoSProfile(
@@ -48,7 +49,18 @@ class ControlNode(Node):
             history=HistoryPolicy.KEEP_LAST,
             depth=1
         )
+
+        qos_profile_incoming = QoSProfile(
+            reliability=ReliabilityPolicy.BEST_EFFORT,
+            durability=DurabilityPolicy.VOLATILE,
+            history=HistoryPolicy.KEEP_LAST,
+            depth=1,
+        )
         
+        # Set the map name for visualization in RVIZ
+        self.map_name = "camera_link"
+
+        # Subscribe to the odometry topic
         self.odometry_subscriber = self.create_subscription(
             VehicleOdometry,
             '/fmu/out/vehicle_odometry',
@@ -56,15 +68,45 @@ class ControlNode(Node):
             qos_profile
         )
         
+        # Publish to the control topic
         self.control_publisher = self.create_publisher(
             Float32MultiArray,
             '/control',
             qos_profile_c
         )
 
+        # Publishes the static voxel grid as a point cloud
+        self.pcd_publisher = self.create_publisher(
+            sensor_msgs.msg.PointCloud2, "/gsplat_pcd", 10
+        )
+        self.timer = self.create_timer(1.0, self.pcd_callback)
+        self.pcd_msg = None
+
+        # Subscribe to the estimated pose topic. In open-loop experiments, this is not used. In the closed-loop experiments,
+        # this can be from the VIO or from Splat-Loc.
+        # NOTE: THIS NEEDS TO BE CHANGED !!! # This might be the same thing as odometry subscriber...
+        self.pose_subscription = self.create_subscription(
+            PoseStamped,
+            "/estimated_pose",
+            self.pose_callback,
+            qos_profile=qos_profile_incoming,
+        )
+
+        # Publishes the trajectory as a Pose Array
+        self.trajectory_publisher = self.create_publisher(PoseArray, "/trajectory", 10)
+
+        # The state of SplatPlan. This is used to trigger replanning. 
+        self.state_publisher = self.create_publisher(String, "/splatplan_state", 10)
+
+        # This publishes the goal pose
+        self.goal_publisher = self.create_publisher(PoseStamped, "/goal_pose", 10)
+
+        # This is the timer that triggers replanning
+        self.replan_timer = self.create_timer(1.0, self.replan)
+
+        ### Initialize variables  ###
         self.fmu_pos = [0.0, 0.0, 0.0]
         
-
         self.velocity_output = [0.0, 0.0, 0.0]
         self.position_output = [0.0, 0.0, 0.0]
         self.acceleration_output = [0.0, 0.0, 0.0]
@@ -72,7 +114,7 @@ class ControlNode(Node):
         self.goal = [5.0, 5.0, 0.0]
 
         self.des_yaw_rate = 0.0
-        self.yaw = (-90.0) * 3.14/ 180.0;
+        self.yaw = (-90.0) * 3.14/ 180.0
 
         self.timer = self.create_timer(1.0 / 50.0, self.publish_control)
 
@@ -83,7 +125,59 @@ class ControlNode(Node):
         self.keyboard_thread.daemon = True
         self.keyboard_thread.start()
 
-        self.traj = splatNav(self.position_output, self.goal)
+        ### SPLATPLAN INITIALIZATION ###
+        ############# Specify scene specific data here  #############
+        # Points to the config file for the GSplat
+        path_to_gsplat = Path('outputs/old_union2/sparse-splat/2024-10-25_113753/config.yml')
+
+        radius = 0.3       # radius of robot
+        amax = 1.
+        vmax = 1.
+
+        lower_bound = torch.tensor([-.8, -.7, -0.2], device=device)
+        upper_bound = torch.tensor([1., 1., -0.1], device=device)
+        resolution = 75
+
+        #################
+        # Robot configuration
+        robot_config = {
+            'radius': radius,
+            'vmax': vmax,
+            'amax': amax,
+        }
+
+        # Environment configuration (specifically voxel)
+        voxel_config = {
+            'lower_bound': lower_bound,
+            'upper_bound': upper_bound,
+            'resolution': resolution,
+        }
+
+        tnow = time.time()
+        self.gsplat = GSplatLoader(path_to_gsplat, device)
+        print('Time to load GSplat:', time.time() - tnow)
+
+        spline_planner = SplinePlanner(spline_deg=6, device=device)
+        self.planner = SplatPlan(self.gsplat, robot_config, voxel_config, spline_planner, device)
+        self.traj = self.plan_path(self.position_output, self.goal)
+
+        print("SplatPlan Initialized...")
+
+    def pcd_callback(self):
+        if self.pcd_msg is None:
+            points = self.gsplat.means.cpu().numpy()
+            colors = (255 * self.gsplat.colors.cpu().numpy()).astype(np.uint32)
+
+            fields = [
+                PointField(name="x", offset=0, datatype=PointField.FLOAT32, count=1),
+                PointField(name="y", offset=4, datatype=PointField.FLOAT32, count=1),
+                PointField(name="z", offset=8, datatype=PointField.FLOAT32, count=1),
+                PointField(name="rgba", offset=12, datatype=PointField.UINT32, count=1),
+            ]
+
+            self.pcd_msg = make_point_cloud(points, colors, self.map_name, fields)
+
+        self.pcd_publisher.publish(self.pcd_msg)
 
     def odometry_callback(self, msg):
         # Extract velocity and position in the x and y directions (assuming NED frame)
@@ -117,7 +211,6 @@ class ControlNode(Node):
             print(e)
         finally:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
-            
 
     def publish_control(self):
         # current_time = self.get_clock().now().to_msg()
@@ -127,9 +220,19 @@ class ControlNode(Node):
         control_msg = Float32MultiArray()
 
         # pop from the first element of the trajectory 
-        #TO ADD
+        if (self.start_mission):
 
+            if len(self.traj) > 0:
+                # waypoint [pos, vel, accel, jerk]
+                outgoing_waypoint = self.traj.pop(0)
 
+                self.position_output = [outgoing_waypoint[0], outgoing_waypoint[1], outgoing_waypoint[2]]
+                self.velocity_output = [outgoing_waypoint[3], outgoing_waypoint[4], outgoing_waypoint[5]]
+                acceleration_output = [outgoing_waypoint[6], outgoing_waypoint[7], outgoing_waypoint[8]]        # We set this to 0 for now
+                self.jerk = [outgoing_waypoint[9], outgoing_waypoint[10], outgoing_waypoint[11]]
+
+            else:
+                print("Trajectory complete.")
 
         control_msg.data = [
             self.acceleration_output[0], self.acceleration_output[1], self.acceleration_output[2],
@@ -141,6 +244,192 @@ class ControlNode(Node):
         self.publish_control_time = self.get_clock().now().to_msg().sec + self.get_clock().now().to_msg().nanosec * 1e-9  
         # print("control message: ", control_msg.data)
 
+    def plan_path(self, start, goal):
+        start = torch.tensor(start).to(device).to(torch.float32)
+        goal = torch.tensor(goal).to(device).to(torch.float32)
+        output = self.planner.generate_path(start, goal)
+
+        # OUTPUT IS A DICTIONARY
+        # traj_data = {
+        #     'path': path.tolist(),
+        #     'polytopes': [torch.cat([polytope[0], polytope[1].unsqueeze(-1)], dim=-1).tolist() for polytope in polytopes],
+        #     'num_polytopes': len(polytopes),
+        #     'traj': traj.tolist(),
+        #     'times_astar': time_astar,
+        #     'times_collision_set': times_collision_set,
+        #     'times_polytope': times_polytope,
+        #     'times_opt': times_opt,
+        #     'feasible': feasible
+        # }
+
+        return output['traj']
+    
+    ### THIS CODE FUNCTION IS A MESS ###
+    def replan(self):
+        print("-" * 20)
+        print("Starting Replanning...")
+
+        if self.current_position is not None and self.current_goal is not None:
+            print("Current Position: ", self.current_position)
+            print("Current Goal: ", self.current_goal)
+            state_msg = String()
+            state_msg.data = "replan"
+            self.state_publisher.publish(state_msg)
+
+            # publish goal
+            msg = PoseStamped()
+            print(self.current_goal)
+            msg.pose.position.x, msg.pose.position.y, msg.pose.position.z = (
+                float(self.current_goal[0]),
+                float(self.current_goal[1]),
+                float(self.current_goal[2]),
+            )
+            msg.header.frame_id = self.map_name
+            self.goal_publisher.publish(msg)
+
+            # update the goal
+            if (
+                np.linalg.norm(self.current_position - self.current_goal)
+                < self.goal_threshold
+            ):
+                if self.goal_idx < len(self.goal_locations):
+                    print(f"****** Reached goal location {self.goal_idx}!")
+                    print("Updating the goal...")
+                    self.save_results()
+                    self.current_goal = self.goal_locations[self.goal_idx]
+
+                    # increment the goal index
+                    self.goal_idx += 1
+
+                    self.splatplan.update_goal(self.current_goal)
+                else:
+                    print("****** Reached all the goal locations!")
+
+                    state_msg = String()
+                    state_msg.data = "tracking"
+                    self.state_publisher.publish(state_msg)
+
+                    self.save_results()
+                    return
+
+            print("Computing Waypoints...")
+            x0 = self.current_position
+
+            # computation time
+            start_time = time.perf_counter()
+
+            try:
+                waypoints, polytopes = self.splatplan.get_waypoint(x0)
+
+                # total computation time (for this iteration)
+                time_to_get_wps = time.perf_counter() - start_time
+                print(f"Total waypoint gen time: {time_to_get_wps}")
+                self.computation_time.append(time_to_get_wps)
+
+                # waypoints to be cached
+                self.cache_waypoint_queue.append(waypoints)
+
+                # polytopes to be cached
+                Ab = [
+                    np.concatenate([A, b[:, None]], axis=-1)
+                    for A, b in zip(polytopes["A"], polytopes["b"])
+                ]
+                self.cache_polytopes.append(Ab)
+
+                # cache the success flag
+                self.cache_success_flag.append(1 if waypoints is not None else 0)
+
+                self.cache_gt_state.append(self.gt_state.copy())
+
+                if waypoints is not None:
+                    self.queue = waypoints.tolist()
+                    print("Successfully computed waypoints, publishing...")
+
+                    poses = []
+                    yaw = 0.0
+
+                    for idx, pt in enumerate(waypoints):
+                        vels = pt[3:6]
+                        msg = Pose()
+                        # msg.header.frame_id = self.map_name
+                        msg.position.x, msg.position.y, msg.position.z = pt[0], pt[1], pt[2]
+
+                        if idx < len(waypoints) - 1:
+
+                            diff = waypoints[idx + 1] - waypoints[idx]
+
+                            prev_yaw = yaw
+                            yaw = np.arctan2(diff[1], diff[0])
+
+                            closest_k = np.round(-(yaw - prev_yaw) / (2*np.pi))
+                            yaw = yaw + 2*np.pi*closest_k     
+
+                        quat = Rotation.from_euler("z", yaw).as_quat()
+                        (
+                            msg.orientation.x,
+                            msg.orientation.y,
+                            msg.orientation.z,
+                            msg.orientation.w,
+                        ) = (quat[0], quat[1], quat[2], quat[3])
+
+                        poses.append(msg)
+
+                    msg = PoseArray()
+                    msg.header.frame_id = self.map_name
+                    msg.poses = poses
+
+                    self.queue_viz_publisher.publish(msg)
+
+                    # Creates JointTrajectory
+                    joint_trajectories = []
+                    yaw = 0.0
+                    for idx, pt in enumerate(waypoints):
+                        vels = pt[3:6]
+                        msg = JointTrajectoryPoint()
+                        # msg.header.frame_id = self.map_name
+                        msg.velocities = [pt[3], pt[4], pt[5]]
+                        msg.accelerations = [pt[6], pt[7], pt[8]]
+                        msg.effort = [pt[9], pt[10], pt[11]]  # Not really effort
+
+                        if idx < len(waypoints) - 1:
+
+                            diff = waypoints[idx + 1] - waypoints[idx]
+
+                            prev_yaw = yaw
+                            yaw = np.arctan2(diff[1], diff[0])
+
+                            closest_k = np.round(-(yaw - prev_yaw) / (2*np.pi))
+                            yaw = yaw + 2*np.pi*closest_k                            
+
+                        # yaw = np.arctan2(vels[1], vels[0])
+                        # quat = Rotation.from_euler("z", yaw).as_quat()
+                        # (
+                        #     msg.orientation.x,
+                        #     msg.orientation.y,
+                        #     msg.orientation.z,
+                        #     msg.orientation.w,
+                        # ) = (quat[0], quat[1], quat[2], quat[3])
+
+                        msg.positions = [pt[0], pt[1], pt[2], yaw]
+
+                        joint_trajectories.append(msg)
+
+                    msg = JointTrajectory()
+                    msg.header.frame_id = self.map_name
+                    msg.points = joint_trajectories
+
+                    self.queue_publisher.publish(msg)
+                
+                state_msg = String()
+                state_msg.data = "tracking"
+                self.state_publisher.publish(state_msg)
+                    
+            except Exception as e:
+                print(e)
+                
+                state_msg = String()
+                state_msg.data = "tracking"
+                self.state_publisher.publish(state_msg)
 
 def main(args=None):
     rclpy.init(args=args)
@@ -153,313 +442,3 @@ def main(args=None):
 
 if __name__ == '__main__':
     main()
-
-def splatNav(start, goal):
-
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-    # Methods for the simulation
-    n = 100         # number of different configurations
-    n_steps = 10   # number of time discretizations
-
-    # Creates a circle for the configuration
-    t = np.linspace(0, 2*np.pi, n)
-    t_z = 10*np.linspace(0, 2*np.pi, n)
-
-    # flag for using saved planner / corridor data
-    use_saved = False
-    config_path_base = 'configs'
-    os.makedirs(config_path_base, exist_ok=True)
-
-    # Using sparse representation?
-    sparse = True
-
-
-    ############# Specify scene specific data here
-
-    scene_name = 'flight_room'
-
-    radius_z = 0.01     # How far to undulate up and down
-    radius_config = 1.35/2  # radius of xy circle
-    mean_config = np.array([0.14, 0.23, -0.15]) # mean of the circle
-
-    if sparse:
-        path_to_gsplat = Path('outputs/old_union2/sparse-splat/2024-10-25_113753/config.yml')
-    else:
-        path_to_gsplat = Path('outputs/old_union2/splatfacto/2024-09-02_151414/config.yml') # points to where the gsplat params are stored
-
-    radius = 0.01       # radius of robot
-    amax = 0.1
-    vmax = 0.1
-
-    lower_bound = torch.tensor([-.8, -.7, -0.2], device=device)
-    upper_bound = torch.tensor([1., 1., -0.1], device=device)
-
-    resolution = 75
-
-    #################
-
-
-    # Robot configuration
-    robot_config = {
-        'radius': radius,
-        'vmax': vmax,
-        'amax': amax,
-    }
-
-    # Environment configuration (specifically voxel)
-    voxel_config = {
-        'lower_bound': lower_bound,
-        'upper_bound': upper_bound,
-        'resolution': resolution,
-    }
-
-    tnow = time.time()
-    gsplat = GSplatLoader(path_to_gsplat, device)
-    print('Time to load GSplat:', time.time() - tnow)
-
-    spline_planner = SplinePlanner(spline_deg=6, device=device)
-    
-   
-     # load voxel config to save time if exists
-    if os.path.exists(f'{config_path_base}/{scene_name}_splatplan.pkl') and use_saved: 
-        print("Loading Splat-Plan Planner from file")
-        with open(f'{config_path_base}/{scene_name}_splatplan.pkl', 'rb') as f:
-            planner = pickle.load(f)
-    else: 
-        planner = SplatPlan(gsplat, robot_config, voxel_config, spline_planner, device)
-        with open(f'{config_path_base}/{scene_name}_splatplan.pkl', 'wb') as f:
-            pickle.dump(planner, f)
-
-    # Run simulation
-    total_data = []
-
-  
-
-    # State is 6D. First 3 are position, last 3 are velocity. Set initial and final velocities to 0
-    x = torch.tensor(start).to(device).to(torch.float32)
-    goal = torch.tensor(goal).to(device).to(torch.float32)
-
-    # We only do this for the single-step SplatPlan
-
-    output = planner.generate_path(x, goal)
-
-    return output
-
-
-# def splatNav():
-
-
-#     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-#     # Methods for the simulation
-#     n = 100         # number of different configurations
-#     n_steps = 10   # number of time discretizations
-
-#     # Creates a circle for the configuration
-#     t = np.linspace(0, 2*np.pi, n)
-#     t_z = 10*np.linspace(0, 2*np.pi, n)
-
-#     # flag for using saved planner / corridor data
-#     use_saved = False
-#     config_path_base = 'configs'
-#     os.makedirs(config_path_base, exist_ok=True)
-
-#     # Using sparse representation?
-#     sparse = True
-
-#     ### ----------------- Possible Methods ----------------- ###
-#     # method = 'splatplan'
-#     # method = 'sfc'
-#     # TODO: splatplan-single-step, A*
-#     ### ----------------- Possible Distance Types ----------------- ###
-
-#     for scene_name in ['flight', 'statues', 'old_union']: #['stonehenge', 'statues', 'flight', 'old_union']:
-#         for method in ['splatplan']:
-
-#             # NOTE: POPULATE THE UPPER AND LOWER BOUNDS FOR OTHER SCENES!!!
-#             if scene_name == 'old_union':
-#                 radius_z = 0.01     # How far to undulate up and down
-#                 radius_config = 1.35/2  # radius of xy circle
-#                 mean_config = np.array([0.14, 0.23, -0.15]) # mean of the circle
-
-#                 if sparse:
-#                     path_to_gsplat = Path('outputs/old_union2/sparse-splat/2024-10-25_113753/config.yml')
-#                 else:
-#                     path_to_gsplat = Path('outputs/old_union2/splatfacto/2024-09-02_151414/config.yml') # points to where the gsplat params are stored
-
-#                 radius = 0.01       # radius of robot
-#                 amax = 0.1
-#                 vmax = 0.1
-
-#                 lower_bound = torch.tensor([-.8, -.7, -0.2], device=device)
-#                 upper_bound = torch.tensor([1., 1., -0.1], device=device)
-
-#                 resolution = 75
-
-#             elif scene_name == 'stonehenge':
-#                 radius_z = 0.01
-#                 radius_config = 0.784/2
-#                 mean_config = np.array([-0.08, -0.03, 0.05])
-
-#                 if sparse:
-#                     path_to_gsplat = Path('outputs/stonehenge/sparse-splat/2024-10-25_120323/config.yml')
-#                 else:
-#                     path_to_gsplat = Path('outputs/stonehenge/splatfacto/2024-09-11_100724/config.yml')
-
-#                 radius = 0.015
-#                 amax = 0.1
-#                 vmax = 0.1
-
-#                 lower_bound = torch.tensor([-5., -.5, -0.], device=device)
-#                 upper_bound = torch.tensor([5., .5, 0.1], device=device)
-
-#                 resolution = 40
-
-#             elif scene_name == 'statues':
-#                 radius_z = 0.03    
-#                 radius_config = 0.475
-#                 mean_config = np.array([-0.064, -0.0064, -0.025])
-
-#                 if sparse:
-#                     path_to_gsplat = Path('outputs/statues/sparse-splat/2024-10-25_114702/config.yml')
-#                 else:
-#                     path_to_gsplat = Path('outputs/statues/splatfacto/2024-09-11_095852/config.yml')
-
-#                 radius = 0.03
-#                 amax = 0.1
-#                 vmax = 0.1
-
-#                 lower_bound = torch.tensor([-.5, -.5, -0.1], device=device)
-#                 upper_bound = torch.tensor([.5, .5, 0.2], device=device)
-
-#                 resolution = 60
-
-#             elif scene_name == 'flight':
-#                 radius_z = 0.06
-#                 radius_config = 0.545/2
-#                 mean_config = np.array([0.19, 0.01, -0.02])
-
-#                 if sparse:
-#                     path_to_gsplat = Path('outputs/flight/sparse-splat/2024-10-25_115216/config.yml')
-#                 else:
-#                     path_to_gsplat = Path('outputs/flight/splatfacto/2024-09-12_172434/config.yml')
-
-#                 radius = 0.02
-#                 amax = 0.1
-#                 vmax = 0.1
-
-#                 lower_bound = torch.tensor([-1.33, -0.5, -0.17], device=device)
-#                 upper_bound = torch.tensor([1, 0.5, 0.26], device=device)
-
-#                 resolution = 100
-
-#             print(f"Running {scene_name} with {method}")
-
-#             # Robot configuration
-#             robot_config = {
-#                 'radius': radius,
-#                 'vmax': vmax,
-#                 'amax': amax,
-#             }
-
-#             # Environment configuration (specifically voxel)
-#             voxel_config = {
-#                 'lower_bound': lower_bound,
-#                 'upper_bound': upper_bound,
-#                 'resolution': resolution,
-#             }
-
-#             tnow = time.time()
-#             gsplat = GSplatLoader(path_to_gsplat, device)
-#             print('Time to load GSplat:', time.time() - tnow)
-
-#             spline_planner = SplinePlanner(spline_deg=6, device=device)
-            
-#             if method == 'splatplan' or method == 'splatplan-single-step':
-                
-#                 # load voxel config to save time if exists
-#                 if os.path.exists(f'{config_path_base}/{scene_name}_splatplan.pkl') and use_saved: 
-#                     print("Loading Splat-Plan Planner from file")
-#                     with open(f'{config_path_base}/{scene_name}_splatplan.pkl', 'rb') as f:
-#                         planner = pickle.load(f)
-#                 else: 
-#                     planner = SplatPlan(gsplat, robot_config, voxel_config, spline_planner, device)
-#                     with open(f'{config_path_base}/{scene_name}_splatplan.pkl', 'wb') as f:
-#                         pickle.dump(planner, f)
-        
-#             elif method == "sfc":
-#                 # load corridor config to save time if exists
-#                 if os.path.exists(f'{config_path_base}/{scene_name}_sfc.pkl') and use_saved:
-#                     print("Loading SFC from file")
-#                     with open(f'{config_path_base}/{scene_name}_sfc.pkl', 'rb') as f:
-#                         sfc = pickle.load(f)
-#                 else: 
-#                     sfc = Corridor(gsplat, robot_config, voxel_config, spline_planner, device)
-#                     with open(f'{config_path_base}/{scene_name}_sfc.pkl', 'wb') as f:
-#                         pickle.dump(sfc, f)
-
-#             else:
-#                 raise ValueError(f"Method {method} not recognized")
-            
-#             ### Create configurations in a circle
-#             x0 = np.stack([radius_config*np.cos(t), radius_config*np.sin(t), radius_z * np.sin(t_z)], axis=-1)     # starting positions
-#             x0 = x0 + mean_config
-
-#             xf = np.stack([radius_config*np.cos(t + np.pi), radius_config*np.sin(t + np.pi), radius_z * np.sin(t_z + np.pi)], axis=-1)     # goal positions
-#             xf = xf + mean_config
-
-#             # Run simulation
-#             total_data = []
-
-#             for trial, (start, goal) in enumerate(zip(x0, xf)):
-
-#                 # State is 6D. First 3 are position, last 3 are velocity. Set initial and final velocities to 0
-#                 x = torch.tensor(start).to(device).to(torch.float32)
-#                 goal = torch.tensor(goal).to(device).to(torch.float32)
-
-#                 # We only do this for the single-step SplatPlan
-#                 if method == 'splatplan':
-#                     output = planner.generate_path(x, goal)
-
-#                 elif method == 'sfc':
-#                     output = sfc.generate_path(x, goal)
-
-#                 else:
-#                     raise ValueError(f"Method {method} not recognized")
-
-#                 total_data.append(output)
-#                 print(f"Trial {trial} completed")
-
-#             # Save trajectory
-#             data = {
-#                 'scene': scene_name,
-#                 'method': method,
-#                 'radius': radius,
-#                 'amax': amax,
-#                 'vmax': vmax,
-#                 'radius_z': radius_z,
-#                 'radius_config': radius_config,
-#                 'mean_config': mean_config.tolist(),
-#                 'lower_bound': lower_bound.tolist(),
-#                 'upper_bound': upper_bound.tolist(),
-#                 'resolution': resolution,
-#                 'n_steps': n_steps,
-#                 'n_time': n_t,
-#                 'total_data': total_data,
-#             }
-
-#             # # create directory if it doesn't exist
-#             # os.makedirs('trajs', exist_ok=True)
-
-#             # # write to the file
-#             # if sparse:
-#             #     save_path = f'trajs/{scene_name}_sparse_{method}.json'
-#             # else:
-#             #     save_path = f'trajs/{scene_name}_{method}.json'
-
-#             # with open(save_path, 'w') as f:
-#             #     json.dump(data, f, indent=4)
-
-#             # return the trajectory, not sure exactly how to parse this
-#             return data
