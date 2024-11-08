@@ -51,6 +51,9 @@ class GSplatVoxel():
         bb_maxs = self.gsplat.means + torch.sqrt(torch.diagonal(self.gsplat.covs, dim1=1, dim2=2)) + self.radius
         #bb_center = self.gsplat.means
 
+        # A majority of the Gaussians are extremely small, smaller than the discretization size of the grid. 
+        #
+
         # Optional?: Mask out ellipsoids that have bounding boxes outside of grid bounds
 
         # The vertices are min, max, min + x, min + y, min + z, min + xy, min + xz, min + yz

@@ -173,7 +173,7 @@ for scene_name in ['flight', 'statues', 'old_union']: #['stonehenge', 'statues',
 
         # Run simulation
         total_data = []
-
+        
         for trial, (start, goal) in enumerate(zip(x0, xf)):
 
             # State is 6D. First 3 are position, last 3 are velocity. Set initial and final velocities to 0
