@@ -36,7 +36,7 @@ sparse = False
 # TODO: splatplan-single-step, A*
 ### ----------------- Possible Distance Types ----------------- ###
 
-for scene_name in ['flight', 'statues', 'old_union']: #['stonehenge', 'statues', 'flight', 'old_union']:
+for scene_name in ['statues', 'old_union']: #['stonehenge', 'statues', 'flight', 'old_union']:
     for method in ['splatplan']:
 
         # NOTE: POPULATE THE UPPER AND LOWER BOUNDS FOR OTHER SCENES!!!
@@ -92,10 +92,10 @@ for scene_name in ['flight', 'statues', 'old_union']: #['stonehenge', 'statues',
             amax = 0.1
             vmax = 0.1
 
-            lower_bound = torch.tensor([-.5, -.5, -0.1], device=device)
+            lower_bound = torch.tensor([-.5, -.5, -0.3], device=device)
             upper_bound = torch.tensor([.5, .5, 0.2], device=device)
 
-            resolution = 60
+            resolution = 100
 
         elif scene_name == 'flight':
             radius_z = 0.06
@@ -149,7 +149,7 @@ for scene_name in ['flight', 'statues', 'old_union']: #['stonehenge', 'statues',
                 planner = SplatPlan(gsplat, robot_config, voxel_config, spline_planner, device)
                 with open(f'{config_path_base}/{scene_name}_splatplan.pkl', 'wb') as f:
                     pickle.dump(planner, f)
-       
+            planner.gsplat_voxel.create_mesh('blender_envs/statues_voxel.obj')
         elif method == "sfc":
             # load corridor config to save time if exists
             if os.path.exists(f'{config_path_base}/{scene_name}_sfc.pkl') and use_saved:
@@ -209,6 +209,8 @@ for scene_name in ['flight', 'statues', 'old_union']: #['stonehenge', 'statues',
             'n_steps': n_steps,
             'total_data': total_data,
         }
+
+        raise
 
         # create directory if it doesn't exist
         os.makedirs('trajs', exist_ok=True)

@@ -3,6 +3,75 @@ import torch
 import open3d as o3d
 from initialization.astar_utils import astar3D
 
+def generate_kernel(self):
+    # Functions find the voxelized overapproximation of the Minkowski sum 
+
+    lx, ly, lz = self.cell_sizes
+    
+    # Perform Minkowski Sum of sphere over a voxel
+    # Determine maximum size of kernel in voxels
+    extent = (torch.ceil(1./ self.cell_sizes * self.r) + 1).to(torch.uint8)
+
+    kernel = torch.ones(extent, device=self.device, dtype=torch.float32)
+
+    # Need to figure out how much to shave off
+    # Method: Go through the brick encompassing one quadrant of the sphere centered at one of the
+    # corners of the voxel. We use the method that if any corner of a voxel is in the sphere, then reject.
+    # NOTE: This method is not necessarily tight, i.e. there could be voxels that barely touch the sphere without
+    # vertices in the sphere. 
+    test_grid = np.array([[-lx*np.ceil(r/lx), lx],
+    [-ly*np.ceil(r/ly), ly],
+    [-lz*np.ceil(r/lz), lz]])
+
+    num_x, num_y, num_z = (np.ceil(r/lx) + 2).astype(np.uint32), (np.ceil(r/ly) + 2).astype(np.uint32), (np.ceil(r/lz) + 2).astype(np.uint32)
+
+    x, y, z = np.meshgrid(np.linspace(test_grid[0, 0], test_grid[0, 1], num_x, endpoint=True), 
+        np.linspace(test_grid[1, 0], test_grid[1, 1], num_y, endpoint=True), 
+        np.linspace(test_grid[2, 0], test_grid[2, 1], num_z, endpoint=True))
+    pts = np.stack([x, y, z], axis=-1)
+
+    mask = np.sum(pts**2, axis=-1) > r**2       #mask will have 1 if outside of sphere
+
+    # Splitting based on vertices (x, y, z) in ([0 1], [0 1], [0 1])
+    x0y0z0 = mask[:-1, :-1, :-1]   #[0, 0, 0]
+    x1y0z0 = mask[1:, :-1, :-1]    #[1, 0, 0]
+    x0y1z0 = mask[:-1, 1:, :-1]    #[0, 1, 0]
+    x0y0z1 = mask[:-1, :-1, 1:]    #[0, 0, 1]
+    x1y1z0 = mask[1:, 1:, :-1]     #[1, 1, 0]
+    x0y1z1 = mask[:-1, 1:, 1:]     #[0, 1, 1]
+    x1y0z1 = mask[1:, :-1, 1:]     #[1, 0, 1]
+    x1y1z1 = mask[1:, 1:, 1:]      #[1, 1, 1]
+
+    partial_mask = np.stack([x0y0z0, x1y0z0, x0y1z0, x0y0z1, x1y1z0, x0y1z1, x1y0z1, x1y1z1], axis=-1)
+    partial_mask = np.prod(partial_mask, axis=-1) < 1     # If 1, this means at least one vertex in sphere
+
+    mask_x_flip = partial_mask[::-1, :, :]
+    mask_y_flip = partial_mask[:, ::-1, :]
+    mask_z_flip = partial_mask[:, :, ::-1]
+    mask_xy_flip = mask_x_flip[:, ::-1, :]
+    mask_yz_flip = mask_y_flip[:, :, ::-1]
+    mask_xz_flip = mask_x_flip[:, :, ::-1]
+    mask_xyz_flip = mask_xy_flip[:, :, ::-1]
+
+    along_y_1 = np.concatenate([partial_mask, mask_y_flip[:, 1:, :]], axis=1)
+    along_y_2 = np.concatenate([mask_x_flip, mask_xy_flip[:, 1:, :]], axis=1)
+    along_y_3 = np.concatenate([mask_z_flip, mask_yz_flip[:, 1:, :]], axis=1)
+    along_y_4 = np.concatenate([mask_xz_flip, mask_xyz_flip[:, 1:, :]], axis=1)
+
+    along_x_1 = np.concatenate([along_y_1, along_y_2[1:, :, :]], axis=0)
+    along_x_2 = np.concatenate([along_y_3, along_y_4[1:, :, :]], axis=0)
+
+    mask = np.concatenate([along_x_1, along_x_2[:, :, 1:]], axis=-1)
+    mask = np.transpose(mask, (1, 0, 2))
+
+    kernel = mask*kernel
+
+    # kernel = (2*np.ceil(x_extent/(2*lx) - 1).astype(np.uint32) + 1, 2*np.ceil(y_extent/(2*ly) - 1).astype(np.uint32) + 1, 2*np.ceil(z_extent/(2*lz) - 1).astype(np.uint32) + 1)
+
+    return torch.tensor(kernel, device=device, dtype=torch.float32)
+
+
+
 class GSplatVoxel():
     def __init__(self, gsplat, lower_bound, upper_bound, resolution, radius, device):
         self.gsplat = gsplat
@@ -46,9 +115,9 @@ class GSplatVoxel():
         )
         self.grid_centers = torch.stack([X, Y, Z], dim=-1)
 
-        # Compute the bounding box properties, accounting for robot radius inflation
-        bb_mins = self.gsplat.means - torch.sqrt(torch.diagonal(self.gsplat.covs, dim1=1, dim2=2)) - self.radius
-        bb_maxs = self.gsplat.means + torch.sqrt(torch.diagonal(self.gsplat.covs, dim1=1, dim2=2)) + self.radius
+        # Compute the bounding box properties, accounting for robot radius inflation ### TODO: WIP, NEED TO ACCOUNT FOR ROBOT RADIUS IN UNFOLD
+        bb_mins = self.gsplat.means - torch.sqrt(torch.diagonal(self.gsplat.covs, dim1=1, dim2=2))
+        bb_maxs = self.gsplat.means + torch.sqrt(torch.diagonal(self.gsplat.covs, dim1=1, dim2=2))
         #bb_center = self.gsplat.means
 
         # A majority of the Gaussians are extremely small, smaller than the discretization size of the grid. 
@@ -113,8 +182,8 @@ class GSplatVoxel():
         counter = 0
         while len(bb_mins) > 0:
 
-            bb_min_list = torch.split(bb_mins, 100000)
-            bb_max_list = torch.split(bb_maxs, 100000)
+            bb_min_list = torch.split(bb_mins, 10000000)
+            bb_max_list = torch.split(bb_maxs, 10000000)
 
             bb_mins = []
             bb_maxs = []
