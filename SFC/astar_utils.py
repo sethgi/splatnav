@@ -1,6 +1,5 @@
 import numpy as np
 import dijkstra3d
-import open3d as o3d
 
 # Perform coarse path planning
 def astar3D(field, source, target, feasible):

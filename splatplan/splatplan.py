@@ -2,8 +2,6 @@ import torch
 import numpy as np
 import open3d as o3d
 import scipy
-from scipy import sparse
-import clarabel
 import time
 
 from polytopes.polytopes_utils import h_rep_minimal, find_interior, compute_segment_in_polytope

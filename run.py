@@ -3,7 +3,6 @@ import os
 import torch
 from pathlib import Path    
 import time
-import pickle 
 import numpy as np
 import json
 from SFC.corridor_utils import Corridor
@@ -191,7 +190,7 @@ for scene_name in ['stonehenge', 'statues', 'flight', 'old_union']:
 
         # create directory if it doesn't exist
         os.makedirs('trajs', exist_ok=True)
-
+        
         # write to the file
         if sparse:
             save_path = f'trajs/{scene_name}_sparse_{method}.json'

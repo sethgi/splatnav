@@ -2,7 +2,6 @@ import numpy as np
 import scipy
 import torch
 import open3d as o3d
-import time
 
 from ellipsoids.mesh_utils import create_gs_mesh
 from ellipsoids.covariance_utils import quaternion_to_rotation_matrix

@@ -10,11 +10,8 @@ from pathlib import Path
 import time
 import pickle 
 import numpy as np
-from tqdm import tqdm
 import json
-from SFC.corridor_utils import Corridor
 from splat.splat_utils import GSplatLoader
-from splatplan.splatplan import SplatPlan
 from splatplan.spline_utils import SplinePlanner
 from ellipsoids.intersection_utils import gs_sphere_intersection_test
 from ellipsoids.covariance_utils import quaternion_to_rotation_matrix
@@ -35,18 +32,13 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # Methods for the simulation
 n = 100         # number of different configurations
 n_steps = 10   # number of time discretizations
-n_t = 500       # number of time steps. NOTE:This is only used for myopic methods like single-step splatplan!!!
 
 # Creates a circle for the configuration
 t = np.linspace(0, 2*np.pi, n)
 t_z = 10*np.linspace(0, 2*np.pi, n)
 
-
 ### ----------------- Possible Methods ----------------- ###
-# method = 'splatplan'
-# method = 'sfc'
 # method = 'ompl'
-# TODO: splatplan-single-step, A*
 ### ----------------- Possible Distance Types ----------------- ###
 
 class EVC(ob.StateValidityChecker):
@@ -286,7 +278,6 @@ for scene_name in ['stonehenge', 'flight', 'old_union']:#['stonehenge', 'statues
             'upper_bound': upper_bound.tolist(),
             'resolution': resolution,
             'n_steps': n_steps,
-            'n_time': n_t,
             'total_data': total_data,
         }
 
@@ -296,8 +287,5 @@ for scene_name in ['stonehenge', 'flight', 'old_union']:#['stonehenge', 'statues
         # write to the file
         with open(f'trajs/{scene_name}_{method}.json', 'w') as f:
             json.dump(data, f, indent=4)
-
-            
-
 
 # %%
