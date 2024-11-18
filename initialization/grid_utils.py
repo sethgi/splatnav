@@ -1,76 +1,9 @@
 import numpy as np
 import torch
 import open3d as o3d
+import unfoldNd
+
 from initialization.astar_utils import astar3D
-
-def generate_kernel(self):
-    # Functions find the voxelized overapproximation of the Minkowski sum 
-
-    lx, ly, lz = self.cell_sizes
-    
-    # Perform Minkowski Sum of sphere over a voxel
-    # Determine maximum size of kernel in voxels
-    extent = (torch.ceil(1./ self.cell_sizes * self.r) + 1).to(torch.uint8)
-
-    kernel = torch.ones(extent, device=self.device, dtype=torch.float32)
-
-    # Need to figure out how much to shave off
-    # Method: Go through the brick encompassing one quadrant of the sphere centered at one of the
-    # corners of the voxel. We use the method that if any corner of a voxel is in the sphere, then reject.
-    # NOTE: This method is not necessarily tight, i.e. there could be voxels that barely touch the sphere without
-    # vertices in the sphere. 
-    test_grid = np.array([[-lx*np.ceil(r/lx), lx],
-    [-ly*np.ceil(r/ly), ly],
-    [-lz*np.ceil(r/lz), lz]])
-
-    num_x, num_y, num_z = (np.ceil(r/lx) + 2).astype(np.uint32), (np.ceil(r/ly) + 2).astype(np.uint32), (np.ceil(r/lz) + 2).astype(np.uint32)
-
-    x, y, z = np.meshgrid(np.linspace(test_grid[0, 0], test_grid[0, 1], num_x, endpoint=True), 
-        np.linspace(test_grid[1, 0], test_grid[1, 1], num_y, endpoint=True), 
-        np.linspace(test_grid[2, 0], test_grid[2, 1], num_z, endpoint=True))
-    pts = np.stack([x, y, z], axis=-1)
-
-    mask = np.sum(pts**2, axis=-1) > r**2       #mask will have 1 if outside of sphere
-
-    # Splitting based on vertices (x, y, z) in ([0 1], [0 1], [0 1])
-    x0y0z0 = mask[:-1, :-1, :-1]   #[0, 0, 0]
-    x1y0z0 = mask[1:, :-1, :-1]    #[1, 0, 0]
-    x0y1z0 = mask[:-1, 1:, :-1]    #[0, 1, 0]
-    x0y0z1 = mask[:-1, :-1, 1:]    #[0, 0, 1]
-    x1y1z0 = mask[1:, 1:, :-1]     #[1, 1, 0]
-    x0y1z1 = mask[:-1, 1:, 1:]     #[0, 1, 1]
-    x1y0z1 = mask[1:, :-1, 1:]     #[1, 0, 1]
-    x1y1z1 = mask[1:, 1:, 1:]      #[1, 1, 1]
-
-    partial_mask = np.stack([x0y0z0, x1y0z0, x0y1z0, x0y0z1, x1y1z0, x0y1z1, x1y0z1, x1y1z1], axis=-1)
-    partial_mask = np.prod(partial_mask, axis=-1) < 1     # If 1, this means at least one vertex in sphere
-
-    mask_x_flip = partial_mask[::-1, :, :]
-    mask_y_flip = partial_mask[:, ::-1, :]
-    mask_z_flip = partial_mask[:, :, ::-1]
-    mask_xy_flip = mask_x_flip[:, ::-1, :]
-    mask_yz_flip = mask_y_flip[:, :, ::-1]
-    mask_xz_flip = mask_x_flip[:, :, ::-1]
-    mask_xyz_flip = mask_xy_flip[:, :, ::-1]
-
-    along_y_1 = np.concatenate([partial_mask, mask_y_flip[:, 1:, :]], axis=1)
-    along_y_2 = np.concatenate([mask_x_flip, mask_xy_flip[:, 1:, :]], axis=1)
-    along_y_3 = np.concatenate([mask_z_flip, mask_yz_flip[:, 1:, :]], axis=1)
-    along_y_4 = np.concatenate([mask_xz_flip, mask_xyz_flip[:, 1:, :]], axis=1)
-
-    along_x_1 = np.concatenate([along_y_1, along_y_2[1:, :, :]], axis=0)
-    along_x_2 = np.concatenate([along_y_3, along_y_4[1:, :, :]], axis=0)
-
-    mask = np.concatenate([along_x_1, along_x_2[:, :, 1:]], axis=-1)
-    mask = np.transpose(mask, (1, 0, 2))
-
-    kernel = mask*kernel
-
-    # kernel = (2*np.ceil(x_extent/(2*lx) - 1).astype(np.uint32) + 1, 2*np.ceil(y_extent/(2*ly) - 1).astype(np.uint32) + 1, 2*np.ceil(z_extent/(2*lz) - 1).astype(np.uint32) + 1)
-
-    return torch.tensor(kernel, device=device, dtype=torch.float32)
-
-
 
 class GSplatVoxel():
     def __init__(self, gsplat, lower_bound, upper_bound, resolution, radius, device):
@@ -85,7 +18,6 @@ class GSplatVoxel():
         if isinstance(self.resolution, int):
             self.resolution = torch.tensor([self.resolution, self.resolution, self.resolution], device=self.device)
         
-
         # Define max and minimum indices
         self.min_index = torch.zeros(3, dtype=int, device=self.device)
         self.max_index = torch.tensor(self.resolution, dtype=int, device=self.device) - 1
@@ -95,6 +27,7 @@ class GSplatVoxel():
         self.non_navigable_grid = None
 
         with torch.no_grad():
+            self.generate_kernel()
             self.create_navigable_grid()
             # self.create_mesh('collision_mesh.obj')
 
@@ -102,7 +35,7 @@ class GSplatVoxel():
     # having to check every point/index in the grid with all bounding boxes in the scene
 
     # NOTE: Might be useful to visualize this navigable grid to see if it is correct and for paper.
-    def create_navigable_grid(self):
+    def create_navigable_grid(self, unfold=True, chunk=1000000):
 
         # Create a grid
         self.non_navigable_grid = torch.zeros( (self.resolution[0], self.resolution[1], self.resolution[2]), dtype=bool, device=self.device)
@@ -115,15 +48,34 @@ class GSplatVoxel():
         )
         self.grid_centers = torch.stack([X, Y, Z], dim=-1)
 
-        # Compute the bounding box properties, accounting for robot radius inflation ### TODO: WIP, NEED TO ACCOUNT FOR ROBOT RADIUS IN UNFOLD
-        bb_mins = self.gsplat.means - torch.sqrt(torch.diagonal(self.gsplat.covs, dim1=1, dim2=2))
-        bb_maxs = self.gsplat.means + torch.sqrt(torch.diagonal(self.gsplat.covs, dim1=1, dim2=2))
-        #bb_center = self.gsplat.means
+        if unfold:
+            # Compute the bounding box properties, accounting for robot radius inflation ### TODO: WIP, NEED TO ACCOUNT FOR ROBOT RADIUS IN UNFOLD
+            bb_mins = self.gsplat.means - torch.sqrt(torch.diagonal(self.gsplat.covs, dim1=1, dim2=2))
+            bb_maxs = self.gsplat.means + torch.sqrt(torch.diagonal(self.gsplat.covs, dim1=1, dim2=2))
 
-        # A majority of the Gaussians are extremely small, smaller than the discretization size of the grid. 
-        #
+            # A majority of the Gaussians are extremely small, smaller than the discretization size of the grid. 
+            # TODO:???
 
-        # Optional?: Mask out ellipsoids that have bounding boxes outside of grid bounds
+
+        else:
+            bb_mins = self.gsplat.means - torch.sqrt(torch.diagonal(self.gsplat.covs, dim1=1, dim2=2)) - self.radius
+            bb_maxs = self.gsplat.means + torch.sqrt(torch.diagonal(self.gsplat.covs, dim1=1, dim2=2)) + self.radius
+
+        # Mask out ellipsoids that have bounding boxes outside of grid bounds
+        # reference: https://math.stackexchange.com/questions/2651710/simplest-way-to-determine-if-two-3d-boxes-intersect
+        # If any of the conditions are true, the intervals overlap
+        condition1 = (self.lower_bound[None, :] - bb_mins <= 0.) & (self.upper_bound[None, :] - bb_mins >= 0.)
+        condition2 = (self.lower_bound[None, :] - bb_maxs <= 0.) & (self.upper_bound[None, :] - bb_maxs >= 0.)
+        condition3 = (self.lower_bound[None, :] - bb_mins >= 0.) & (self.lower_bound[None, :] - bb_maxs <= 0.)
+        condition4 = (self.upper_bound[None, :] - bb_mins >= 0.) & (self.upper_bound[None, :] - bb_maxs <= 0.)
+
+        overlap = condition1 | condition2 | condition3 | condition4
+
+        # there must be overlap in all 3 dimensions in order for the boxes to overlap
+        overlap = torch.all(overlap, dim=-1)
+
+        bb_mins = bb_mins[overlap]
+        bb_maxs = bb_maxs[overlap]
 
         # The vertices are min, max, min + x, min + y, min + z, min + xy, min + xz, min + yz
         axes_mask = [torch.tensor([0, 0, 0], device=self.device),
@@ -182,8 +134,8 @@ class GSplatVoxel():
         counter = 0
         while len(bb_mins) > 0:
 
-            bb_min_list = torch.split(bb_mins, 10000000)
-            bb_max_list = torch.split(bb_maxs, 10000000)
+            bb_min_list = torch.split(bb_mins, chunk)
+            bb_max_list = torch.split(bb_maxs, chunk)
 
             bb_mins = []
             bb_maxs = []
@@ -245,8 +197,66 @@ class GSplatVoxel():
             print('Iteration:', counter)
             counter += 1
 
+        # If unfold, we need to now do a maxpool3d with the grid
+        if unfold:
+            kernel_size = tuple(self.robot_mask.shape)
+            padding = tuple( (torch.tensor(self.robot_mask.shape) - 1) // 2)
+            lib_module = unfoldNd.UnfoldNd(
+                kernel_size, dilation=1, padding=padding, stride=1
+            )
+            unfolded = lib_module(self.non_navigable_grid.to(dtype=torch.float32)[None, None]).squeeze()     # kernel_size x N x N x N
+            unfolded = unfolded.to(dtype=bool)
+
+            # Take the maxpool3d of the binary grid
+            mask = self.robot_mask.reshape(-1)
+            unfolded = unfolded[mask]       # mask_size x N x N x N
+            non_navigable = torch.any(unfolded, dim=0).reshape(self.resolution[0], self.resolution[1], self.resolution[2])  
+            self.non_navigable_grid = non_navigable
+
         return
     
+    def generate_kernel(self):
+        # Functions find the voxelized overapproximation of the Minkowski sum 
+
+        rad_cell = torch.ceil(self.radius / self.cell_sizes - 0.5)
+        lower_bound = -rad_cell
+        upper_bound = rad_cell
+
+        resolution = (2*upper_bound + 1).to(dtype=torch.uint8)
+
+        # Forms the vertices of a unit cube
+        axes_mask = torch.stack([torch.tensor([0, 0, 0], device=self.device),
+                torch.tensor([1, 0, 0], device=self.device),
+                torch.tensor([0, 1, 0], device=self.device),
+                torch.tensor([0, 0, 1], device=self.device),
+                torch.tensor([1, 1, 0], device=self.device),
+                torch.tensor([1, 0, 1], device=self.device),
+                torch.tensor([0, 1, 1], device=self.device),
+                torch.tensor([1, 1, 1], device=self.device)], dim=0)    # 8 x 3
+
+        # Form the lower grid vertex
+        X, Y, Z = torch.meshgrid(
+            torch.linspace(lower_bound[0], upper_bound[0], resolution[0], device=self.device),
+            torch.linspace(lower_bound[1], upper_bound[1], resolution[1], device=self.device),
+            torch.linspace(lower_bound[2], upper_bound[2], resolution[2], device=self.device)
+        )
+
+        # bottom vertex
+        grid_vertices = torch.stack([X, Y, Z], dim=-1)
+        grid_vertices = grid_vertices.reshape(-1, 3)
+
+        vertices = (grid_vertices[:, None, :] + axes_mask[None, ...]) * self.cell_sizes[None, None, :]
+        vertex_length = torch.linalg.norm(vertices, dim=-1)     # N x 8
+
+        vertex_mask = torch.any(vertex_length <= self.radius, dim=-1)      # N
+
+        # reshape back into grid
+        vertex_mask = vertex_mask.reshape(resolution[0], resolution[1], resolution[2])
+
+        self.robot_mask = vertex_mask
+
+        return 
+
     def create_mesh(self, save_path=None):
         # Create a mesh from the navigable grid
         non_navigable_grid_centers = self.grid_centers[self.non_navigable_grid]

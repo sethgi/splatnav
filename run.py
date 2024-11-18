@@ -36,7 +36,7 @@ sparse = False
 # TODO: splatplan-single-step, A*
 ### ----------------- Possible Distance Types ----------------- ###
 
-for scene_name in ['statues', 'old_union']: #['stonehenge', 'statues', 'flight', 'old_union']:
+for scene_name in ['stonehenge', 'statues', 'flight', 'old_union']:
     for method in ['splatplan']:
 
         # NOTE: POPULATE THE UPPER AND LOWER BOUNDS FOR OTHER SCENES!!!
@@ -57,7 +57,7 @@ for scene_name in ['statues', 'old_union']: #['stonehenge', 'statues', 'flight',
             lower_bound = torch.tensor([-.8, -.7, -0.2], device=device)
             upper_bound = torch.tensor([1., 1., -0.1], device=device)
 
-            resolution = 75
+            resolution = 100
 
         elif scene_name == 'stonehenge':
             radius_z = 0.01
@@ -69,14 +69,14 @@ for scene_name in ['statues', 'old_union']: #['stonehenge', 'statues', 'flight',
             else:
                 path_to_gsplat = Path('outputs/stonehenge/splatfacto/2024-09-11_100724/config.yml')
 
-            radius = 0.015
+            radius = 0.01
             amax = 0.1
             vmax = 0.1
 
-            lower_bound = torch.tensor([-5., -.5, -0.], device=device)
-            upper_bound = torch.tensor([5., .5, 0.1], device=device)
+            lower_bound = torch.tensor([-.5, -.5, -0.], device=device)
+            upper_bound = torch.tensor([.5, .5, 0.3], device=device)
 
-            resolution = 40
+            resolution = 150
 
         elif scene_name == 'statues':
             radius_z = 0.03    
@@ -149,7 +149,7 @@ for scene_name in ['statues', 'old_union']: #['stonehenge', 'statues', 'flight',
                 planner = SplatPlan(gsplat, robot_config, voxel_config, spline_planner, device)
                 with open(f'{config_path_base}/{scene_name}_splatplan.pkl', 'wb') as f:
                     pickle.dump(planner, f)
-            planner.gsplat_voxel.create_mesh('blender_envs/statues_voxel.obj')
+            planner.gsplat_voxel.create_mesh(f'blender_envs/{scene_name}_voxel.obj')
         elif method == "sfc":
             # load corridor config to save time if exists
             if os.path.exists(f'{config_path_base}/{scene_name}_sfc.pkl') and use_saved:
@@ -163,7 +163,7 @@ for scene_name in ['statues', 'old_union']: #['stonehenge', 'statues', 'flight',
 
         else:
             raise ValueError(f"Method {method} not recognized")
-        
+
         ### Create configurations in a circle
         x0 = np.stack([radius_config*np.cos(t), radius_config*np.sin(t), radius_z * np.sin(t_z)], axis=-1)     # starting positions
         x0 = x0 + mean_config
@@ -209,8 +209,6 @@ for scene_name in ['statues', 'old_union']: #['stonehenge', 'statues', 'flight',
             'n_steps': n_steps,
             'total_data': total_data,
         }
-
-        raise
 
         # create directory if it doesn't exist
         os.makedirs('trajs', exist_ok=True)
