@@ -29,7 +29,6 @@ class GSplatVoxel():
         with torch.no_grad():
             self.generate_kernel()
             self.create_navigable_grid()
-            # self.create_mesh('collision_mesh.obj')
 
     # We employ a subdividing strategy to populate the voxel grid in order to avoid
     # having to check every point/index in the grid with all bounding boxes in the scene
@@ -55,7 +54,6 @@ class GSplatVoxel():
 
             # A majority of the Gaussians are extremely small, smaller than the discretization size of the grid. 
             # TODO:???
-
 
         else:
             bb_mins = self.gsplat.means - torch.sqrt(torch.diagonal(self.gsplat.covs, dim1=1, dim2=2)) - self.radius
