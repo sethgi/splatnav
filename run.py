@@ -21,7 +21,7 @@ t = np.linspace(0, 2*np.pi, n)
 t_z = 10*np.linspace(0, 2*np.pi, n)
 
 # Using sparse representation?
-sparse = False
+sparse = True
 
 ### ----------------- Possible Methods ----------------- ###
 # method = 'splatplan'
@@ -29,7 +29,7 @@ sparse = False
 ### ----------------- Possible Distance Types ----------------- ###
 
 for scene_name in ['stonehenge', 'statues', 'flight', 'old_union']:
-    for method in ['sfc']:
+    for method in ['splatplan']:
 
         # NOTE: POPULATE THE UPPER AND LOWER BOUNDS FOR OTHER SCENES!!!
         if scene_name == 'old_union':
@@ -134,7 +134,10 @@ for scene_name in ['stonehenge', 'statues', 'flight', 'old_union']:
             planner = SplatPlan(gsplat, robot_config, voxel_config, spline_planner, device)
 
             # Creates the voxel grid for visualization
-            planner.gsplat_voxel.create_mesh(f'blender_envs/{scene_name}_voxel.obj')
+            if sparse:
+                planner.gsplat_voxel.create_mesh(f'blender_envs/{scene_name}_voxel_sparse.obj')
+            else:
+                planner.gsplat_voxel.create_mesh(f'blender_envs/{scene_name}_voxel.obj')
 
         elif method == "sfc":
             sfc = Corridor(gsplat, robot_config, voxel_config, spline_planner, device)
