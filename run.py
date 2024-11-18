@@ -5,7 +5,6 @@ from pathlib import Path
 import time
 import pickle 
 import numpy as np
-from tqdm import tqdm
 import json
 from SFC.corridor_utils import Corridor
 from splat.splat_utils import GSplatLoader
@@ -22,22 +21,16 @@ n_steps = 10   # number of time discretizations
 t = np.linspace(0, 2*np.pi, n)
 t_z = 10*np.linspace(0, 2*np.pi, n)
 
-# flag for using saved planner / corridor data
-use_saved = False
-config_path_base = 'configs'
-os.makedirs(config_path_base, exist_ok=True)
-
 # Using sparse representation?
 sparse = False
 
 ### ----------------- Possible Methods ----------------- ###
 # method = 'splatplan'
 # method = 'sfc'
-# TODO: splatplan-single-step, A*
 ### ----------------- Possible Distance Types ----------------- ###
 
 for scene_name in ['stonehenge', 'statues', 'flight', 'old_union']:
-    for method in ['splatplan']:
+    for method in ['sfc']:
 
         # NOTE: POPULATE THE UPPER AND LOWER BOUNDS FOR OTHER SCENES!!!
         if scene_name == 'old_union':
@@ -138,28 +131,14 @@ for scene_name in ['stonehenge', 'statues', 'flight', 'old_union']:
 
         spline_planner = SplinePlanner(spline_deg=6, device=device)
         
-        if method == 'splatplan' or method == 'splatplan-single-step':
-            
-            # load voxel config to save time if exists
-            if os.path.exists(f'{config_path_base}/{scene_name}_splatplan.pkl') and use_saved: 
-                print("Loading Splat-Plan Planner from file")
-                with open(f'{config_path_base}/{scene_name}_splatplan.pkl', 'rb') as f:
-                    planner = pickle.load(f)
-            else: 
-                planner = SplatPlan(gsplat, robot_config, voxel_config, spline_planner, device)
-                with open(f'{config_path_base}/{scene_name}_splatplan.pkl', 'wb') as f:
-                    pickle.dump(planner, f)
+        if method == 'splatplan':
+            planner = SplatPlan(gsplat, robot_config, voxel_config, spline_planner, device)
+
+            # Creates the voxel grid for visualization
             planner.gsplat_voxel.create_mesh(f'blender_envs/{scene_name}_voxel.obj')
+
         elif method == "sfc":
-            # load corridor config to save time if exists
-            if os.path.exists(f'{config_path_base}/{scene_name}_sfc.pkl') and use_saved:
-                print("Loading SFC from file")
-                with open(f'{config_path_base}/{scene_name}_sfc.pkl', 'rb') as f:
-                    sfc = pickle.load(f)
-            else: 
-                sfc = Corridor(gsplat, robot_config, voxel_config, spline_planner, device)
-                with open(f'{config_path_base}/{scene_name}_sfc.pkl', 'wb') as f:
-                    pickle.dump(sfc, f)
+            sfc = Corridor(gsplat, robot_config, voxel_config, spline_planner, device)
 
         else:
             raise ValueError(f"Method {method} not recognized")
