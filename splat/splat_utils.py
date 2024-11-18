@@ -37,6 +37,8 @@ class GSplatLoader():
 
         self.colors = SH2RGB(self.splat.pipeline.model.features_dc.detach().clone())
 
+        self.opacities = torch.sigmoid(self.splat.pipeline.model.opacities.detach().clone())
+
         print(f'There are {self.means.shape[0]} Gaussians in the GSplat model')
 
         return
@@ -79,8 +81,20 @@ class GSplatLoader():
 
         return 
 
-    def save_mesh(self, filepath):
-        scene = create_gs_mesh(self.means.cpu().numpy(), quaternion_to_rotation_matrix(self.rots).cpu().numpy(), self.scales.cpu().numpy(), self.colors.cpu().numpy(), res=4, transform=None, scale=None)
+    def save_mesh(self, filepath, bounds=None, res=4):
+        if bounds is not None:
+            mask = torch.all((self.means - bounds[:, 0] >= 0) & (bounds[:, 1] - self.means >= 0), dim=-1)
+            means = self.means[mask]
+            rots = self.rots[mask]
+            scales = self.scales[mask]
+            colors = self.colors[mask]
+        else:
+            means = self.means
+            rots = self.rots
+            scales = self.scales
+            colors = self.colors
+
+        scene = create_gs_mesh(means.cpu().numpy(), quaternion_to_rotation_matrix(rots).cpu().numpy(), scales.cpu().numpy(), colors.cpu().numpy(), res=res, transform=None, scale=None)
         success = o3d.io.write_triangle_mesh(filepath, scene, print_progress=True)
 
         return success

@@ -32,11 +32,16 @@ from pose_estimator.utils import *
 # # # # # Config Path
 # # # # #
 
+config_path = 'outputs/old_union2/splatfacto/2024-09-02_151414/config.yml'
+scene_name = 'old_union'
+
+dataset_path = 'data/old_union2'
+
 # config path:
-config_path = Path(f"{os.path.expanduser('<config_path>')}")
+config_path = Path(f"{os.path.expanduser(config_path)}")
 
 # name of the scene
-scene_name: str = "<scene_name>"
+scene_name: str = scene_name
 
 # %%
 # rescale factor
@@ -92,9 +97,7 @@ eval_imgs = gsplat.get_images()
 # # #
 
 # path to the dataset of images and poses for evaluation
-dataset_path = config_path.parent
-
-dataset_path: Path = Path(f"{os.path.expanduser('<dataset_path>')}")
+dataset_path: Path = Path(dataset_path)
 
 # dataset
 gsplat_dataset = load_dataset(data_path=dataset_path, dataset_mode="all")
@@ -349,135 +352,140 @@ for idx, t_step in enumerate(range(t_offset, num_trials, estimation_frequency)):
     # # Pose Refinement
     # #
 
-    if local_refinement_method == Local_Refinement.ICP:
-        # #
-        # # Iterative Closest Point (ICP)
-        # #
+    try:
+        if local_refinement_method == Local_Refinement.ICP:
+            # #
+            # # Iterative Closest Point (ICP)
+            # #
 
-        if local_registration_method == Local_Registration.ICP:
-            # ICP
+            if local_registration_method == Local_Registration.ICP:
+                # ICP
+
+                # start time
+                t0 = time.perf_counter()
+
+                # local refinement for registration
+                local_est_transformation = ICP_refinement_registration(
+                    source=cam_pcd,
+                    target=target_down,
+                    source_fpfh=source_fpfh,
+                    target_fpfh=target_fpfh,
+                    voxel_size=voxel_size,
+                    global_transformation=global_est_transformation,
+                )
+
+                # end time
+                t1 = time.perf_counter()
+
+                print(lev_2_sep)
+                print(f"Local Refinement: ICP Registration")
+                print(lev_2_sep)
+
+            if local_registration_method == Local_Registration.COLORED_ICP:
+                # Colored ICP
+
+                # start time
+                t0 = time.perf_counter()
+
+                # local refinement for registration
+                local_est_transformation = Colored_ICP_refinement_registration(
+                    source=cam_pcd,
+                    target=target_down,
+                    source_fpfh=source_fpfh,
+                    target_fpfh=target_fpfh,
+                    voxel_size=voxel_size,
+                    global_transformation=global_est_transformation,
+                )
+
+                # end time
+                t1 = time.perf_counter()
+
+                print(lev_2_sep)
+                print(f"Local Refinement: Colored ICP Registration")
+                print(lev_2_sep)
+
+            # estimated pose
+            # convert from OPENCV Camera convention to
+            local_est_pose = local_est_transformation.transformation.copy()
+            local_est_pose[:, 1] = -local_est_pose[:, 1]
+            local_est_pose[:, 2] = -local_est_pose[:, 2]
+
+            # pose error
+            error = SE3error(gt_pose, local_est_pose)
+
+            if print_error_stats:
+                print(
+                    f"SE(3) Estimation Error -- Rotation: {error[0]}, Translation: {error[1]}"
+                )
+
+            if display_compute_stats:
+                print(f"Local Registration took {t1-t0} seconds!")
+
+            print(sep)
+            print(sep)
+
+            if enable_registration_visualization:
+                visualize_registration_result(
+                    source=cam_pcd,
+                    target=env_pcd,
+                    transformation=local_est_transformation.transformation,
+                    enable_downsampled_visualization=enable_downsampled_visualization,
+                    downsampled_voxel_size=downsampled_voxel_size,
+                )
+        elif local_refinement_method == Local_Refinement.PnP_RANSAC:
+            # #
+            # # Perspective-n-Point (PnP)
+            # #
+
+            print(sep)
+            print(lev_2_sep)
+            print(f"Local Refinement: PnP-RANSAC")
+            print(lev_2_sep)
+
+            # initial guess
+            if idx == 0:
+                init_guess = torch.tensor(global_est_pose, device=device).float()
+            else:
+                init_guess = torch.tensor(local_est_pose, device=device).float()
 
             # start time
             t0 = time.perf_counter()
 
-            # local refinement for registration
-            local_est_transformation = ICP_refinement_registration(
-                source=cam_pcd,
-                target=target_down,
-                source_fpfh=source_fpfh,
-                target_fpfh=target_fpfh,
-                voxel_size=voxel_size,
-                global_transformation=global_est_transformation,
+            # estimated pose
+            # convert from OPENCV Camera convention to
+            local_est_pose = execute_PnP_RANSAC(
+                gsplat,
+                init_guess,
+                camera_intrinsics_K=K,
+                rgb_input=cam_rgb,
+                feature_detector=feature_detector,
+                save_image=save_image_debug,
+                pnp_figure_filename="figures/pnp_init_guess.png",
+                print_stats=True,
+                visualize_PnP_matches=visualize_PnP_matches,
+                pnp_matches_figure_filename="figures/pnp_matches.png",
             )
 
             # end time
             t1 = time.perf_counter()
 
-            print(lev_2_sep)
-            print(f"Local Refinement: ICP Registration")
-            print(lev_2_sep)
+            # pose error
+            error = SE3error(gt_pose, local_est_pose)
 
-        if local_registration_method == Local_Registration.COLORED_ICP:
-            # Colored ICP
+            if print_error_stats:
+                print(
+                    f"{sep_space} SE(3) Estimation Error -- Rotation: {error[0]}, Translation: {error[1]}"
+                )
 
-            # start time
-            t0 = time.perf_counter()
-
-            # local refinement for registration
-            local_est_transformation = Colored_ICP_refinement_registration(
-                source=cam_pcd,
-                target=target_down,
-                source_fpfh=source_fpfh,
-                target_fpfh=target_fpfh,
-                voxel_size=voxel_size,
-                global_transformation=global_est_transformation,
-            )
+            if display_compute_stats:
+                print(f"Local Registration took {t1-t0} seconds!")
 
             # end time
             t1 = time.perf_counter()
 
-            print(lev_2_sep)
-            print(f"Local Refinement: Colored ICP Registration")
-            print(lev_2_sep)
-
-        # estimated pose
-        # convert from OPENCV Camera convention to
-        local_est_pose = local_est_transformation.transformation.copy()
-        local_est_pose[:, 1] = -local_est_pose[:, 1]
-        local_est_pose[:, 2] = -local_est_pose[:, 2]
-
-        # pose error
-        error = SE3error(gt_pose, local_est_pose)
-
-        if print_error_stats:
-            print(
-                f"SE(3) Estimation Error -- Rotation: {error[0]}, Translation: {error[1]}"
-            )
-
-        if display_compute_stats:
-            print(f"Local Registration took {t1-t0} seconds!")
-
-        print(sep)
-        print(sep)
-
-        if enable_registration_visualization:
-            visualize_registration_result(
-                source=cam_pcd,
-                target=env_pcd,
-                transformation=local_est_transformation.transformation,
-                enable_downsampled_visualization=enable_downsampled_visualization,
-                downsampled_voxel_size=downsampled_voxel_size,
-            )
-    elif local_refinement_method == Local_Refinement.PnP_RANSAC:
-        # #
-        # # Perspective-n-Point (PnP)
-        # #
-
-        print(sep)
-        print(lev_2_sep)
-        print(f"Local Refinement: PnP-RANSAC")
-        print(lev_2_sep)
-
-        # initial guess
-        if idx == 0:
-            init_guess = torch.tensor(global_est_pose, device=device).float()
-        else:
-            init_guess = torch.tensor(local_est_pose, device=device).float()
-
-        # start time
-        t0 = time.perf_counter()
-
-        # estimated pose
-        # convert from OPENCV Camera convention to
-        local_est_pose = execute_PnP_RANSAC(
-            gsplat,
-            init_guess,
-            camera_intrinsics_K=K,
-            rgb_input=cam_rgb,
-            feature_detector=feature_detector,
-            save_image=save_image_debug,
-            pnp_figure_filename="figures/pnp_init_guess.png",
-            print_stats=True,
-            visualize_PnP_matches=visualize_PnP_matches,
-            pnp_matches_figure_filename="figures/pnp_matches.png",
-        )
-
-        # end time
-        t1 = time.perf_counter()
-
-        # pose error
-        error = SE3error(gt_pose, local_est_pose)
-
-        if print_error_stats:
-            print(
-                f"{sep_space} SE(3) Estimation Error -- Rotation: {error[0]}, Translation: {error[1]}"
-            )
-
-        if display_compute_stats:
-            print(f"Local Registration took {t1-t0} seconds!")
-
-        # end time
-        t1 = time.perf_counter()
+    except:
+        print("Error in Pose Refinement")
+        break
 
     # close figures
     plt.close()
