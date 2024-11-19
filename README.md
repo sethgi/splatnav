@@ -71,6 +71,7 @@ This repository is built off of [Nerfstudio](https://github.com/nerfstudio-proje
 * [cvxopt](https://cvxopt.org/). Generic convex solver.
 * [cvxpy](https://www.cvxpy.org/). Generic convex solver.
 * [unfoldNd](https://github.com/f-dangel/unfoldNd). Necessary to perform Maxpool3D operation over masked kernel for producing voxel grid.
+* [LightGlue](https://github.com/cvg/LightGlue). Feature matching for Splat-Loc.
 
 ## Datasets
 Our datasets, trained models, and trajectories are hosted on a [Google Drive](https://drive.google.com/drive/folders/1K0zfpuAti43YIBK5APFd-Yv73CvljgMC?usp=sharing). The scenes used in the paper are `flightgate` (`flight`), `statues`,  `stonehenge`, `adirondacks` (which is also named `old union`). The training data and model is in the `training` folder, while the trajectories are in `traj` (simulated) and `ros` (hardware). You can drag and drop these folders into your working directory.
@@ -94,14 +95,23 @@ Splat-Nav
 ```
 
 ## Running Splat-Nav
+
+### Splat-Plan
 After the dependencies, data, and model is set up, run
 ```
-python run.py
+python run_splatplan.py
 ```
 to execute Splat-Plan on simulated scenes. The most important thing is to ensure that the path in NeRFWrapper is pointing to the right model location. Many parameters can be tuned in this file. The trajectory data will be saved in the `trajs` folder.
 
-### Baselines
+#### Baselines
 Within `run.py`, there is also the option to run our Python implementation of the Safe Flight Corridor baseline (https://ieeexplore.ieee.org/document/7839930). The RRT* baseline can be executed through `run_rrt.py`.
+
+### Splat-Loc
+Similarly, run
+```
+python run_splatloc.py
+```
+to execute Splat-Loc on specified trained models and datasets. 
 
 ### Visualizing the paths
 Under construction...
