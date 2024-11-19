@@ -65,7 +65,7 @@ Splat-Plan builds a safe-by-construction polytope corridor through the map based
 ## Dependencies
 This repository is built off of [Nerfstudio](https://github.com/nerfstudio-project/nerfstudio/tree/main). Please first follow the installation instructions there before installing any of the dependencies specifically for this repository. Once you have Nerfstudio installed in your Conda environment, install the following dependencies in that environment.
 
-* [CLARABEL](https://github.com/oxfordcontrol/Clarabel.rs). This library is for solving the quadratic program.
+* [Clarabel](https://github.com/oxfordcontrol/Clarabel.rs). This library is for solving the quadratic program.
 * [dijkstra3d](https://github.com/seung-lab/dijkstra3d). This library is for solving A* for path initialization.
 * [polytope](https://github.com/tulip-control/polytope/tree/main). This library is for performing certain operations with polytopes.
 * [cvxopt](https://cvxopt.org/). Generic convex solver.
