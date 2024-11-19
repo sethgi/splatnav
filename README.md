@@ -17,7 +17,7 @@ Gaussian Splatting Maps]()
 
 <p align="center">
 
-  <h1 align="center"><img src="imgs/logo.png" width="25"> Splat-Nav: Safe Real-Time Robot Navigation in
+  <h1 align="center"><img src="imgs/logo.png" width="45"> Splat-Nav: Safe Real-Time Robot Navigation in
 Gaussian Splatting Maps</h1>
   <p align="center"> 
     <a href="https://msl.stanford.edu/people/timchen"><strong>Timothy Chen</strong><sup>1</sup></a>
