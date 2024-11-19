@@ -11,3 +11,4 @@ trajs
 *.ply
 __pycache__/
 *.pyc
+!*/logo.png
