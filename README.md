@@ -60,7 +60,6 @@ Splat-Plan builds a safe-by-construction polytope corridor through the map based
 
 ## TODOs
 1. Upload corresponding ROS nodes.
-2. Upload visualizer of trajectories in Nerfstudio viewer.
 
 ## Dependencies
 This repository is built off of [Nerfstudio](https://github.com/nerfstudio-project/nerfstudio/tree/main). Please first follow the installation instructions there before installing any of the dependencies specifically for this repository. Once you have Nerfstudio installed in your Conda environment, install the following dependencies in that environment.
@@ -72,6 +71,7 @@ This repository is built off of [Nerfstudio](https://github.com/nerfstudio-proje
 * [cvxpy](https://www.cvxpy.org/). Generic convex solver.
 * [unfoldNd](https://github.com/f-dangel/unfoldNd). Necessary to perform Maxpool3D operation over masked kernel for producing voxel grid.
 * [LightGlue](https://github.com/cvg/LightGlue). Feature matching for Splat-Loc.
+* [viser](https://github.com/nerfstudio-project/viser). Web-based 3D interactive visualizer. This already comes with Nerfstudio, however the latest version is needed to render Gaussian Splats.
 
 ## Datasets
 Our datasets, trained models, and trajectories are hosted on a [Google Drive](https://drive.google.com/drive/folders/1K0zfpuAti43YIBK5APFd-Yv73CvljgMC?usp=sharing). The scenes used in the paper are `flightgate` (`flight`), `statues`,  `stonehenge`, `adirondacks` (which is also named `old union`). The training data and model is in the `training` folder, while the trajectories are in `traj` (simulated) and `ros` (hardware). You can drag and drop these folders into your working directory.
@@ -114,7 +114,11 @@ python run_splatloc.py
 to execute Splat-Loc on specified trained models and datasets. 
 
 ### Visualizing the paths
-Under construction...
+Data visualization is done through viser (https://github.com/nerfstudio-project/viser). It is a web-based 3D interactive visualizer that supports meshes and Gaussian Splatting. Viser also supports programmatic view rendering, which was used to generate many of the visuals in our videos. To visualize the trajectories in viser, run
+```
+python visualize.py
+```
+. The latest version of viser should be used, as that supports Gaussian Splatting rendering.
 
 ## Generating your own scenes
 To use your own datasets, simply train a Nerfstudio `splatfacto` model and follow the folder structure as illustrated above. We also provide a simple way of producing sparse reconstructions of the scene by including a simple L1 sparsity loss on the opacity during Gaussian Splatting training (https://github.com/chengine/sparse_splat). These sparser models are also provided in the Google Drive. In `run.py`, there is a flag to use the sparser model. 

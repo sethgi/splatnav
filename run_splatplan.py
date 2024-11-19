@@ -135,7 +135,7 @@ for scene_name in ['stonehenge', 'statues', 'flight', 'old_union']:
 
             # Creates the voxel grid for visualization
             if sparse:
-                planner.gsplat_voxel.create_mesh(f'blender_envs/{scene_name}_voxel_sparse.obj')
+                planner.gsplat_voxel.create_mesh(f'blender_envs/{scene_name}_sparse_voxel.obj')
             else:
                 planner.gsplat_voxel.create_mesh(f'blender_envs/{scene_name}_voxel.obj')
 
