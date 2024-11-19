@@ -17,7 +17,7 @@ Gaussian Splatting Maps]()
 
 <p align="center">
 
-  <h1 align="center"><img src="imgs/logo.svg" width="200"></h1>
+  <h1 align="center"><img src="imgs/logo.svg" width="1000"></h1>
   <h2 align="center">Safe Real-Time Robot Navigation in
 Gaussian Splatting Maps</h2>
   <p align="center"> 
