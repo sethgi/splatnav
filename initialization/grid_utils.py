@@ -84,47 +84,6 @@ class GSplatVoxel():
                 torch.tensor([0, 1, 1], device=self.device),
                 torch.tensor([1, 1, 1], device=self.device)]
 
-        ### NEWER CODE ### Is too slow...
-        # bb_index_size = (bb_maxs - bb_mins) / self.cell_sizes
-
-        # # Clamp the bounding box indices to the grid resolution
-        # bb_index_size = torch.clamp(bb_index_size, min=torch.zeros(3, device=self.device)[None, :], max=self.resolution[None, :].float())
-
-        # max_sizes = torch.round(torch.max(bb_index_size, dim=0).values).to(torch.int64)        # This forms our meshgrid
-
-        # print(max_sizes)
-        # X_bb, Y_bb, Z_bb = torch.meshgrid(
-        #     torch.linspace(0., 1., max_sizes[0].item()+1, device=self.device),
-        #     torch.linspace(0., 1., max_sizes[1].item()+1, device=self.device),
-        #     torch.linspace(0., 1., max_sizes[2].item()+1, device=self.device)
-        # )       # This forms the grid between bb_min and bb_max
-
-        # bb_indices_all = torch.stack([X_bb, Y_bb, Z_bb], dim=-1).reshape(-1, 3)
-
-        # # For every bounding box, we need to produce this meshgrid
-        # bb_index_size_list = torch.split(bb_index_size, 1000)
-        # bb_mins_list = torch.split(bb_mins, 1000)
-
-        # counter = 0
-        # for bb_index_size_, bb_mins_ in zip(bb_index_size_list, bb_mins_list):
-        #     bb_indices = bb_index_size_[:, None, :] * bb_indices_all[None, :, :] + bb_mins_[:, None, :]
-        #     print(bb_indices.shape, bb_indices.max(), bb_indices.min())
-        #     bb_indices = torch.round( bb_indices.reshape(-1, 3) ).to(torch.int64)
-
-        #     # Kill everything that is outside of the grid bounds
-        #     in_grid = ( torch.all( (self.max_index - bb_indices) >= 0. , dim=-1) ) & ( torch.all( bb_indices >= 0. , dim=-1) )
-        #     bb_indices = bb_indices[in_grid]
-
-        #     # Might want to do a unique to prune out duplicates
-        #     bb_indices = torch.unique_consecutive(bb_indices, dim=0)
-        #     #print(bb_indices.shape, bb_indices.max(), bb_indices.min())
-        #     self.non_navigable_grid[bb_indices[:,0], bb_indices[:,1], bb_indices[:,2]] = True
-
-        #     print('Iteration:', counter)
-        #     counter += 1
-
-        ### OLDER CODE ###
-
         # Subdivide the bounding box until it fits into the grid resolution
         # lowers = []
         # uppers = []

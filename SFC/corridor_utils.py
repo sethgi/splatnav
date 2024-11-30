@@ -2,17 +2,24 @@ from .astar_utils import *
 import torch
 import numpy as np
 import scipy
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-import copy
 import time
 
 from initialization.grid_utils import GSplatVoxel
 from polytopes.collision_set import GSplatCollisionSet
-from polytopes.polytopes_utils import h_rep_minimal, find_interior, compute_segment_in_polytope
+from polytopes.polytopes_utils import find_interior, compute_segment_in_polytope
 
 # All functions are adapted and named accordingly to the "Planning Dynamically Feasible Trajectories for Quadrotors Using Safe Flight Corridors in 3-D Complex Environments"
 #  paper (https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=7839930). These functions have been adapted into Pytorch.
+
+# Combinations
+# A* on point cloud grid (means and dense sample on surface) vs. A* on splat grid
+# Buffer by radius of robot vs. buffer by radius of robot + max eig of splat
+
+# sfc-1: A* on point cloud grid (means), SFC on means, buffer by robot radius   (expected: unsafe, but polytopes large. Infeasible often)
+# sfc-2: A* on point cloud grid (sampled surface), SFC on sampled surface, buffer by robot radius (expected: slightly unsafe, but polytopes slightly larger. Slow execution time)
+# sfc-3: A* on splat grid (means), SFC on means, buffer by robot radius (expected: unsafesafe, but polytopes large.)
+# sfc-4: A* on splat grid (means), SFC on means, buffer by robot radius + max eig of splat (expected: safe, but polytopes very small.)
+
 class Corridor():
     def __init__(self, gsplat, robot_config, env_config, spline_planner, device) -> None:
         # Rs is the radius around the path, determined by the max velocity and acceleration of the robot.
@@ -26,7 +33,6 @@ class Corridor():
         self.vmax = robot_config['vmax']
         self.amax = robot_config['amax']
         self.collision_set = GSplatCollisionSet(self.gsplat, self.vmax, self.amax, self.radius, self.device)
-        
         
         # Environment configuration (specifically voxel)
         self.lower_bound = env_config['lower_bound']
