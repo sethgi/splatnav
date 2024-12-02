@@ -156,7 +156,7 @@ class SafeFlightCorridor(Corridor):
             max_scale = torch.max(scales, dim=-1).values
 
             # Deflate the polytope
-            b = b - (self.radius - max_scale) * torch.norm(A, dim=-1)
+            b = b - (self.radius + max_scale) * torch.norm(A, dim=-1)
             A = A
 
         else:
