@@ -12,14 +12,14 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 ### ----------------- Possible Methods ----------------- ###
 # method = 'splatplan'
-# method = 'sfc'
+# method = 'sfc-* {* can be 1, 2, 3, 4}'
 # method = 'ompl'
 ### ----------------- Possible Distance Types ----------------- ###
 
-sparse = False
+sparse = True
 
-for scene_name in ['statues', 'old_union', 'flight', 'stonehenge']: #['stonehenge', 'statues', 'flight', 'old_union']:
-    for method in ['ompl']:
+for scene_name in ['statues', 'old_union', 'flight', 'stonehenge']:
+    for method in ['splatplan']:
 
         # NOTE: POPULATE THE UPPER AND LOWER BOUNDS FOR OTHER SCENES!!!
         if scene_name == 'old_union':

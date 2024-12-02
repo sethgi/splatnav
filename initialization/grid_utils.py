@@ -4,9 +4,8 @@ import unfoldNd
 
 from initialization.astar_utils import astar3D
 
-class GSplatVoxel():
-    def __init__(self, gsplat, lower_bound, upper_bound, resolution, radius, device):
-        self.gsplat = gsplat
+class Voxel():
+    def __init__(self, lower_bound, upper_bound, resolution, radius, device):
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
 
@@ -25,6 +24,121 @@ class GSplatVoxel():
         self.grid_centers = None
         self.non_navigable_grid = None
 
+    def create_navigable_grid(self):
+        pass
+
+    def create_mesh(self, save_path=None):
+        # Create a mesh from the navigable grid
+        non_navigable_grid_centers = self.grid_centers[self.non_navigable_grid]
+        non_navigable_grid_centers_flatten = non_navigable_grid_centers.view(-1, 3).cpu().numpy()
+
+        scene = o3d.geometry.TriangleMesh()
+        for cell_center in non_navigable_grid_centers_flatten:
+            box = o3d.geometry.TriangleMesh.create_box(width=self.cell_sizes[0].cpu().numpy(), 
+                                                        height=self.cell_sizes[1].cpu().numpy(), 
+                                                        depth=self.cell_sizes[2].cpu().numpy())
+            box = box.translate(cell_center, relative=False)
+            scene += box
+
+        if save_path is not None:
+            o3d.io.write_triangle_mesh(save_path, scene, print_progress=True)
+
+        return scene
+
+    def create_path(self, x0, xf):
+        source = self.get_indices(x0)   # Find nearest grid point and find its index
+        target = self.get_indices(xf)
+
+        source_occupied = self.non_navigable_grid[source[0], source[1], source[2]]
+        target_occupied = self.non_navigable_grid[target[0], target[1], target[2]]
+
+        # If either target or source is occupied, we do a nearest neighbor search to find the closest navigable point
+        if target_occupied:
+            print('Target is in occupied voxel. Projecting end point to closest unoccupied.')
+
+            xf = self.find_closest_navigable(xf)
+            target = self.get_indices(xf)
+
+        if source_occupied:
+            print('Source is in occupied voxel. Projecting starting point to closest unoccupied.')
+
+            x0 = self.find_closest_navigable(x0)
+            source = self.get_indices(x0)
+        
+        # Plans A*. Only accepts numpy objects. Returns numpy array N x 3.
+        path3d, indices = astar3D(self.non_navigable_grid.cpu().numpy(), source.cpu().numpy(), target.cpu().numpy(), self.grid_centers.cpu().numpy())
+
+        try:
+            assert len(path3d) > 0
+            #path3d = np.concatenate([x0.reshape(1, 3).cpu().numpy(), path3d, xf.reshape(1, 3).cpu().numpy()], axis=0)
+        except:
+            print('Could not find a feasible initialize path. Please change the initial/final positions to not be in collision.')
+            path3d = None
+
+        return path3d
+
+    def get_indices(self, point):
+        transformed_pt = point - self.grid_centers[0, 0, 0]
+
+        indices = torch.round(transformed_pt / self.cell_sizes).to(dtype=int)
+
+        # If querying points outside of the bounds, project to the nearest side
+        for i, ind in enumerate(indices):
+            if ind < 0.:
+                indices[i] = 0
+
+                print('Point is outside of minimum bounds. Projecting to nearest side. This may cause unintended behavior.')
+
+            elif ind > self.non_navigable_grid.shape[i]-1:
+                indices[i] = self.non_navigable_grid.shape[i]-1
+
+                print('Point is outside of maximum bounds. Projecting to nearest side. This may cause unintended behavior.')
+
+        return indices
+
+    def find_closest_navigable(self, point):
+        navigable_centers = self.grid_centers[~self.non_navigable_grid].reshape(-1, 3)
+        dist = torch.norm(navigable_centers - point[None, :], dim=-1)
+        min_point_idx = torch.argmin(dist)
+
+        closest_navigable = navigable_centers[min_point_idx]
+
+        return closest_navigable
+    
+class PointCloudVoxel(Voxel):
+    def __init__(self, point_cloud, lower_bound, upper_bound, resolution, radius, device):
+        super().__init__(lower_bound, upper_bound, resolution, radius, device)
+        self.point_cloud = point_cloud
+    
+        with torch.no_grad():
+            self.create_navigable_grid()
+
+    def create_navigable_grid(self):
+        # Create a grid
+        self.non_navigable_grid = torch.zeros( (self.resolution[0], self.resolution[1], self.resolution[2]), dtype=bool, device=self.device)
+
+        # ...along with its corresponding grid centers
+        X, Y, Z = torch.meshgrid(
+            torch.linspace(self.lower_bound[0] + self.cell_sizes[0]/2, self.upper_bound[0] - self.cell_sizes[0]/2, self.resolution[0], device=self.device),
+            torch.linspace(self.lower_bound[1] + self.cell_sizes[1]/2, self.upper_bound[1] - self.cell_sizes[1]/2, self.resolution[1], device=self.device),
+            torch.linspace(self.lower_bound[2] + self.cell_sizes[2]/2, self.upper_bound[2] - self.cell_sizes[2]/2, self.resolution[2], device=self.device)
+        )
+        self.grid_centers = torch.stack([X, Y, Z], dim=-1)
+
+        shifted_points = self.point_cloud - (self.grid_centers[0, 0, 0])          # N x 3
+
+        points_index = torch.round( shifted_points / self.cell_sizes[None, :] ).to(dtype=int)
+
+        # Check if the vertex or subdivision is within the grid bounds. If not, ignore.
+        in_grid = ( torch.all( (self.max_index - points_index) >= 0. , dim=-1) ) & ( torch.all( points_index >= 0. , dim=-1) ) 
+        points_index = points_index[in_grid]
+        self.non_navigable_grid[points_index[:,0], points_index[:,1], points_index[:,2]] = True
+
+class GSplatVoxel(Voxel):
+    def __init__(self, gsplat, lower_bound, upper_bound, resolution, radius, device):
+        super().__init__(lower_bound, upper_bound, resolution, radius, device)
+        self.gsplat = gsplat
+    
         with torch.no_grad():
             self.generate_kernel()
             self.create_navigable_grid()
@@ -212,81 +326,3 @@ class GSplatVoxel():
         self.robot_mask = vertex_mask
 
         return 
-
-    def create_mesh(self, save_path=None):
-        # Create a mesh from the navigable grid
-        non_navigable_grid_centers = self.grid_centers[self.non_navigable_grid]
-        non_navigable_grid_centers_flatten = non_navigable_grid_centers.view(-1, 3).cpu().numpy()
-
-        scene = o3d.geometry.TriangleMesh()
-        for cell_center in non_navigable_grid_centers_flatten:
-            box = o3d.geometry.TriangleMesh.create_box(width=self.cell_sizes[0].cpu().numpy(), 
-                                                        height=self.cell_sizes[1].cpu().numpy(), 
-                                                        depth=self.cell_sizes[2].cpu().numpy())
-            box = box.translate(cell_center, relative=False)
-            scene += box
-
-        if save_path is not None:
-            o3d.io.write_triangle_mesh(save_path, scene, print_progress=True)
-
-        return scene
-
-    def create_path(self, x0, xf):
-        source = self.get_indices(x0)   # Find nearest grid point and find its index
-        target = self.get_indices(xf)
-
-        source_occupied = self.non_navigable_grid[source[0], source[1], source[2]]
-        target_occupied = self.non_navigable_grid[target[0], target[1], target[2]]
-
-        # If either target or source is occupied, we do a nearest neighbor search to find the closest navigable point
-        if target_occupied:
-            print('Target is in occupied voxel. Projecting end point to closest unoccupied.')
-
-            xf = self.find_closest_navigable(xf)
-            target = self.get_indices(xf)
-
-        if source_occupied:
-            print('Source is in occupied voxel. Projecting starting point to closest unoccupied.')
-
-            x0 = self.find_closest_navigable(x0)
-            source = self.get_indices(x0)
-        
-        # Plans A*. Only accepts numpy objects. Returns numpy array N x 3.
-        path3d, indices = astar3D(self.non_navigable_grid.cpu().numpy(), source.cpu().numpy(), target.cpu().numpy(), self.grid_centers.cpu().numpy())
-
-        try:
-            assert len(path3d) > 0
-            #path3d = np.concatenate([x0.reshape(1, 3).cpu().numpy(), path3d, xf.reshape(1, 3).cpu().numpy()], axis=0)
-        except:
-            print('Could not find a feasible initialize path. Please change the initial/final positions to not be in collision.')
-            path3d = None
-
-        return path3d
-
-    def get_indices(self, point):
-        transformed_pt = point - self.grid_centers[0, 0, 0]
-
-        indices = torch.round(transformed_pt / self.cell_sizes).to(dtype=int)
-
-        # If querying points outside of the bounds, project to the nearest side
-        for i, ind in enumerate(indices):
-            if ind < 0.:
-                indices[i] = 0
-
-                print('Point is outside of minimum bounds. Projecting to nearest side. This may cause unintended behavior.')
-
-            elif ind > self.non_navigable_grid.shape[i]-1:
-                indices[i] = self.non_navigable_grid.shape[i]-1
-
-                print('Point is outside of maximum bounds. Projecting to nearest side. This may cause unintended behavior.')
-
-        return indices
-
-    def find_closest_navigable(self, point):
-        navigable_centers = self.grid_centers[~self.non_navigable_grid].reshape(-1, 3)
-        dist = torch.norm(navigable_centers - point[None, :], dim=-1)
-        min_point_idx = torch.argmin(dist)
-
-        closest_navigable = navigable_centers[min_point_idx]
-
-        return closest_navigable

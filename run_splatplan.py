@@ -5,12 +5,15 @@ from pathlib import Path
 import time
 import numpy as np
 import json
-from SFC.corridor_utils import Corridor
+from SFC.corridor_utils import SafeFlightCorridor
 from splat.splat_utils import GSplatLoader
 from splatplan.splatplan import SplatPlan
 from splatplan.spline_utils import SplinePlanner
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+torch.manual_seed(0)
+np.random.seed(0)
 
 # Methods for the simulation
 n = 100         # number of different configurations
@@ -21,15 +24,15 @@ t = np.linspace(0, 2*np.pi, n)
 t_z = 10*np.linspace(0, 2*np.pi, n)
 
 # Using sparse representation?
-sparse = True
+sparse = False
 
 ### ----------------- Possible Methods ----------------- ###
 # method = 'splatplan'
-# method = 'sfc'
+# method = 'sfc-*' {* can be 1, 2, 3, 4 for different modes, check SFC.corridor_utils.SafeFlightCorridor for more details} 
 ### ----------------- Possible Distance Types ----------------- ###
 
 for scene_name in ['stonehenge', 'statues', 'flight', 'old_union']:
-    for method in ['splatplan']:
+    for method in ['sfc-1', 'sfc-2', 'sfc-3', 'sfc-4']:
 
         # NOTE: POPULATE THE UPPER AND LOWER BOUNDS FOR OTHER SCENES!!!
         if scene_name == 'old_union':
@@ -134,13 +137,14 @@ for scene_name in ['stonehenge', 'statues', 'flight', 'old_union']:
             planner = SplatPlan(gsplat, robot_config, voxel_config, spline_planner, device)
 
             # Creates the voxel grid for visualization
-            if sparse:
-                planner.gsplat_voxel.create_mesh(f'blender_envs/{scene_name}_sparse_voxel.obj')
-            else:
-                planner.gsplat_voxel.create_mesh(f'blender_envs/{scene_name}_voxel.obj')
+            # if sparse:
+            #     planner.gsplat_voxel.create_mesh(f'blender_envs/{scene_name}_sparse_voxel.obj')
+            # else:
+            #     planner.gsplat_voxel.create_mesh(f'blender_envs/{scene_name}_voxel.obj')
 
-        elif method == "sfc":
-            sfc = Corridor(gsplat, robot_config, voxel_config, spline_planner, device)
+        elif method.split("-")[0] == "sfc":
+            mode = int(method.split("-")[1])
+            planner = SafeFlightCorridor(gsplat, robot_config, voxel_config, spline_planner, device, mode=mode)
 
         else:
             raise ValueError(f"Method {method} not recognized")
@@ -161,15 +165,14 @@ for scene_name in ['stonehenge', 'statues', 'flight', 'old_union']:
             x = torch.tensor(start).to(device).to(torch.float32)
             goal = torch.tensor(goal).to(device).to(torch.float32)
 
-            # We only do this for the single-step SplatPlan
-            if method == 'splatplan':
-                output = planner.generate_path(x, goal)
+            tnow = time.time()
+            torch.cuda.synchronize()
 
-            elif method == 'sfc':
-                output = sfc.generate_path(x, goal)
+            output = planner.generate_path(x, goal)
 
-            else:
-                raise ValueError(f"Method {method} not recognized")
+            torch.cuda.synchronize()
+            plan_time = time.time() - tnow
+            output['plan_time'] = plan_time
 
             total_data.append(output)
             print(f"Trial {trial} completed")

@@ -49,7 +49,10 @@ class SplatPlan():
     def generate_path(self, x0, xf):
         # Part 1: Computes the path seed using A*
         tnow = time.time()
+        torch.cuda.synchronize()
+
         path = self.gsplat_voxel.create_path(x0, xf)
+
         torch.cuda.synchronize()
         time_astar = time.time() - tnow
 
@@ -60,48 +63,41 @@ class SplatPlan():
         segments = torch.tensor(np.stack([path[:-1], path[1:]], axis=1), device=self.device)
 
         for it, segment in enumerate(segments):
+
+            # Test if the current segment is in the most recent polytope
+            if it > 0:
+                is_in_polytope = compute_segment_in_polytope(polytope[0], polytope[1], segment)
+            else:
+                #If we haven't created a polytope yet, so we set it to False.
+                is_in_polytope = False
+
             # If this is the first line segment, we always create a polytope. Or subsequently, we only instantiate a polytope if the line segment
-            if ( it == 0 ) or ( it == len(segments) - 1 ):
+            if (it == 0) or (it == len(segments) - 1) or (not is_in_polytope):
 
                 # Part 2: Computes the collision set
                 tnow = time.time()
+                torch.cuda.synchronize()
+                
                 output = self.collision_set.compute_set_one_step(segment)
+
                 torch.cuda.synchronize()
                 times_collision_set += time.time() - tnow
 
                 # Part 3: Computes the polytope
                 tnow = time.time()
+                torch.cuda.synchronize()
+
                 polytope = self.get_polytope_from_outputs(output)
+
                 torch.cuda.synchronize()
                 times_polytope += time.time() - tnow
 
-            else:
-                # Test if the line segment is within the polytope
-                # If the segment is within the polytope, we proceed to next segment
-                if compute_segment_in_polytope(polytope[0], polytope[1], segment):
-
-                    continue
-
-                else:
-                    # If the segment is not within the polytope, we create a new polytope
-                    # Part 2: Computes the collision set
-
-                    tnow = time.time()
-                    output = self.collision_set.compute_set_one_step(segment)
-                    torch.cuda.synchronize()
-                    times_collision_set += time.time() - tnow 
-
-                    # Part 3: Computes the polytope
-                    tnow = time.time()
-                    polytope = self.get_polytope_from_outputs(output)
-                    torch.cuda.synchronize()
-                    times_polytope += time.time() - tnow
-
-            polytopes.append(polytope)
-            #print(f"Instantiated polytope at segment {it}")
+                polytopes.append(polytope)
 
         # Step 4: Perform Bezier spline optimization
         tnow = time.time()
+        torch.cuda.synchronize()
+
         traj, feasible = self.spline_planner.optimize_b_spline(polytopes, segments[0][0], segments[-1][-1])
         if not feasible:
             traj = torch.stack([x0, xf], dim=0)
@@ -110,6 +106,7 @@ class SplatPlan():
 
             print(compute_segment_in_polytope(polytope[0], polytope[1], segments[-1]))
             raise
+
         torch.cuda.synchronize()
         times_opt = time.time() - tnow
   
@@ -133,7 +130,7 @@ class SplatPlan():
     def get_polytope_from_outputs(self, data):
         # For every single line segment, we always create a polytope at the first line segment, 
         # and then we subsequently check if future line segments are within the polytope before creating new ones.
-        gs_ids = data['gaussian_ids']
+        gs_ids = data['primitive_ids']
 
         A_bb = data['A_bb']
         b_bb = data['b_bb_shrunk']
@@ -224,11 +221,6 @@ class SplatPlan():
         norm_A = torch.linalg.norm(A, dim=-1, keepdims=True)
         A = A / norm_A
         b = b / norm_A.squeeze()
-
-        # NOTE: We don't actually do this because its slow and unnecessary IF we are iteratively pruning Gaussians.
-        # By manageability, the midpoint should always be clearly within the polytope
-        # NOTE: Let's hope there are no errors here.
-        #A, b, qhull_pts = h_rep_minimal(A.cpu().numpy(), b.cpu().numpy(), midpoint.cpu().numpy())
 
         return (A, b)
 

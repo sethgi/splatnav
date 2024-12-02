@@ -1,4 +1,5 @@
 import numpy as np
+import torch
 import polytope
 
 def sample_sphere(N_samples):
@@ -17,6 +18,17 @@ def sample_sphere(N_samples):
     z = np.sin(theta) * radius
 
     return np.stack([x, y, z], axis=-1)
+
+def fibonacci_ellipsoid(means, rotations, scalings, kappa=0., n=100):
+
+    points = torch.tensor(sample_sphere(n), dtype=torch.float32, device=means.device)        # N x 3
+
+    new_points = (scalings[:, None, :] + kappa) * points[None, :, :]      # B x N x 3
+
+    new_points = torch.transpose(torch.bmm(rotations, torch.transpose(new_points, 1, 2)), 1, 2)
+    new_points = new_points + means[:, None, :]
+
+    return new_points
 
 def sphere_to_poly(N_samples, radius, center):
 

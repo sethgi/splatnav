@@ -1,4 +1,9 @@
+import numpy as np
+import scipy
 import torch
+import open3d as o3d
+
+from polytopes.polytopes_utils import find_interior
 
 def shrink_polytope(bs, box_bs, r):
     # NOTE: IMPORTANT! This function assumes that the hyperplane normals are already normalized!
@@ -166,6 +171,9 @@ def find_polyhedron(point_cloud, midpoint, R, S):
     As = []
     bs = []
     ps_star = []
+    pivot_indices = []
+    point_cloud_indices = torch.arange(len(scaled_points), device=scaled_points.device)
+
     while len(scaled_points) > 0:
         # Calculate the distance to the origin
         dists = torch.linalg.norm(scaled_points, dim=-1) # M
@@ -181,10 +189,12 @@ def find_polyhedron(point_cloud, midpoint, R, S):
         As.append(p_star)
         bs.append(min_val**2)
         ps_star.append(p_star)
+        pivot_indices.append(point_cloud_indices[where_min])
 
         # We now find and delete all points that are on or outside this hyperplane
-        mask = torch.sum(scaled_points * p_star, dim=-1) < min_val**2 - 1e-2  # M_i, true if on the right side of the hyperplane
+        mask = torch.sqrt(torch.sum(scaled_points * p_star, dim=-1)) < min_val  # M_i, true if on the right side of the hyperplane
         scaled_points = scaled_points[mask] 
+        point_cloud_indices = point_cloud_indices[mask]
 
     # If we only performed one iteration, we can just return the hyperplane
     if len(As) == 1:
@@ -197,6 +207,7 @@ def find_polyhedron(point_cloud, midpoint, R, S):
         As = torch.stack(As, dim=0)
         bs = torch.stack(bs)
         ps_star = torch.stack(ps_star, dim=0)
+        pivot_indices = torch.stack(pivot_indices)
 
     else:
         raise ValueError("No points in the point cloud")
@@ -205,7 +216,7 @@ def find_polyhedron(point_cloud, midpoint, R, S):
     As = As * (1. / S)[None, :] @ R.T    # M x 3
     bs = bs + torch.sum(midpoint[None, :] * As, dim=-1)    # M
 
-    return As, bs, ps_star
+    return As, bs, ps_star, pivot_indices
 
 def save_polytope(polytopes, save_path):
     # polytopes: list of tuples (A, b)

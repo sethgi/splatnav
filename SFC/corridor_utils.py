@@ -4,173 +4,10 @@ import numpy as np
 import scipy
 import time
 
-from initialization.grid_utils import GSplatVoxel
-from polytopes.collision_set import GSplatCollisionSet
+from initialization.grid_utils import GSplatVoxel, PointCloudVoxel
+from polytopes.collision_set import GSplatCollisionSet, PointCloudCollisionSet
 from polytopes.polytopes_utils import find_interior, compute_segment_in_polytope
 from SFC.helper_utils import rotation_matrix_from_vectors, find_closest_hyperplane, shrink_polytope, find_ellipsoid, find_polyhedron, save_polytope
-
-# All functions are adapted and named accordingly to the "Planning Dynamically Feasible Trajectories for Quadrotors Using Safe Flight Corridors in 3-D Complex Environments"
-#  paper (https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=7839930). These functions have been adapted into Pytorch.
-
-# Combinations
-# A* on point cloud grid (means and dense sample on surface) vs. A* on splat grid
-# Buffer by radius of robot vs. buffer by radius of robot + max eig of splat
-
-# sfc-1: A* on point cloud grid (means), SFC on means, buffer by robot radius   (expected: unsafe, but polytopes large. Infeasible often)
-# sfc-2: A* on point cloud grid (sampled surface), SFC on sampled surface, buffer by robot radius (expected: slightly unsafe, but polytopes slightly larger. Slow execution time)
-# sfc-3: A* on splat grid (means), SFC on means, buffer by robot radius (expected: unsafesafe, but polytopes large.)
-# sfc-4: A* on splat grid (means), SFC on means, buffer by robot radius + max eig of splat (expected: safe, but polytopes very small.)
-
-class SafeFlightCorridor(Corridor):
-    def __init__(self, gsplat, robot_config, env_config, spline_planner, device, mode) -> None:
-        super().__init__(gsplat, robot_config, env_config, spline_planner, device)
-
-        # Initialization code that is different for each type of method
-        self.mode = mode
-        if mode == 1:
-
-        elif mode == 2:
-
-        elif mode == 3:
-
-        elif mode == 4:
-            self.collision_set = GSplatCollisionSet(self.gsplat, self.vmax, self.amax, self.radius, self.device)
-            
-            tnow = time.time()
-            torch.cuda.synchronize()
-
-            self.gsplat_voxel = GSplatVoxel(self.gsplat, lower_bound=self.lower_bound, upper_bound=self.upper_bound, resolution=self.resolution, radius=self.radius, device=device)
-            
-            torch.cuda.synchronize()
-            print('Time to create GSplatVoxel:', time.time() - tnow)
-        
-        else:
-            raise ValueError("Invalid mode. Please choose a mode between 1 and 4.")
-
-    def generate_initialization(self, x0, xf):
-        path = self.gsplat_voxel.create_path(x0, xf)
-
-        return path
-
-    def get_collision_set(self, segment):
-        output = self.collision_set.compute_set_one_step(segment)
-
-        return output       # output is a dictionary
-
-    def generate_path(self, x0, xf):
-
-        # Init times
-        times_collision_set = 0
-        times_ellipsoid = 0
-        times_polytope = 0
-        times_shrink = 0
-
-        # Part 1: Computes the path seed using A*
-        tnow = time.time()
-        torch.cuda.synchronize()
-
-        path = self.generate_initialization(x0, xf)
-        
-        torch.cuda.synchronize()
-        time_astar = time.time() - tnow
-
-        polytopes = []      # List of polytopes (A, b)
-        segments = torch.tensor(np.stack([path[:-1], path[1:]], axis=1), device=self.device)        # line segments (N x 2 x 3)
-
-        for it, segment in enumerate(segments):
-            # If this is the first line segment, we always create a polytope. Or subsequently, we only instantiate a polytope if the line segment
-            midpoint = 0.5 * (segment[0] + segment[1])
-
-            # Test if the current segment is in the most recent polytope
-            try:
-                is_in_polytope = compute_segment_in_polytope(polytope[0], polytope[1], segment)
-            except:
-                # If we have an error, it means we haven't created a polytope yet, so we set it to False. This will get caught in the next conditional.
-                is_in_polytope = False
-
-            # If first or last line segment, or when the segment is not contained in the most recent polytope, always create a polytope
-            if it == 0 or it == len(segments) - 1 or ~is_in_polytope:
-
-                # Part 2: Computes the collision set
-                tnow = time.time()
-                torch.cuda.synchronize()
-
-                output = self.get_collision_set(segment)
-
-                torch.cuda.synchronize()
-                times_collision_set += time.time() - tnow
-
-                point_cloud = output['means']
-                box_As = output['A_bb']
-                box_bs = output['b_bb_shrunk']     # already shrunk to account for the radius of the robot
-
-                # If there are no points in the collision set, we can just use the bounding box constraints
-                if len(output['gaussian_ids']) == 0:
-                    polytope = (box_As, box_bs)
-                
-                else:
-
-                    # Part 3: Compute the ellipsoid
-                    tnow = time.time()
-                    torch.cuda.synchronize()
-
-                    ellipsoid, d, p_stars = self.find_ellipsoid(segment, point_cloud)
-
-                    torch.cuda.synchronize()
-                    times_ellipsoid += time.time() - tnow
-
-                    # Part 4: Compute the polytope
-                    tnow = time.time()
-                    torch.cuda.synchronize()
-                    
-                    As, bs, ps_star = self.find_polyhedron(point_cloud, d, ellipsoid)
-                    
-                    # Part 5: Shrink the polytope. OK if the normals are not normalized.
-                    bs = bs - self.radius * torch.norm(As, dim=-1)
-
-                    As = torch.cat([As, box_As], dim=0)
-                    bs = torch.cat([bs, box_bs], dim=0)
-                    
-                    norm_A = torch.linalg.norm(As, dim=-1, keepdims=True)
-                    As = As / norm_A
-                    bs = bs / norm_A.squeeze()
-
-                    polytope = (torch.tensor(As, device=self.device), torch.tensor(bs, device=self.device))
-
-                    torch.cuda.synchronize()
-                    times_polytope += time.time() - tnow
-                
-            polytopes.append(polytope)
-
-        # Step 6: Perform Bezier spline optimization
-        tnow = time.time()
-        torch.cuda.synchronize()
-
-        traj, feasible = self.spline_planner.optimize_b_spline(polytopes, x0, xf)
-        if not feasible:
-            traj = torch.stack([x0, xf], dim=0)
-
-        torch.cuda.synchronize()
-        times_opt = time.time() - tnow
-
-        # save outputs 
-        traj_data = {
-            'path': path.tolist(),
-            'polytopes': [torch.cat([polytope[0], polytope[1].unsqueeze(-1)], dim=-1).tolist() for polytope in polytopes],
-            'num_polytopes': len(polytopes),
-            'traj': traj.tolist(),
-            'times_astar': time_astar,
-            'times_collision_set': times_collision_set,
-            'times_ellipsoid': times_ellipsoid,
-            'times_polytope': times_polytope,
-            'times_opt': times_opt,
-            'feasible': feasible
-        }
-
-        # NOTE: Save the polytope corridor as a mesh for debugging purposes. Uncomment if necessary.
-        #save_polytope(polytopes, 'sfc_corridor.obj')
-
-        return traj_data
 
 class Corridor():
     def __init__(self, gsplat, robot_config, env_config, spline_planner, device) -> None:
@@ -213,10 +50,239 @@ class Corridor():
     def generate_path(self, x0, xf):
         raise NotImplementedError
 
+# All functions are adapted and named accordingly to the "Planning Dynamically Feasible Trajectories for Quadrotors Using Safe Flight Corridors in 3-D Complex Environments"
+#  paper (https://ieeexplore.ieee.org/stamp/stamp.jsp?tp=&arnumber=7839930). These functions have been adapted into Pytorch.
+
+# Combinations
+# A* on point cloud grid (means and dense sample on surface) vs. A* on splat grid
+# Buffer by radius of robot vs. buffer by radius of robot + max eig of splat
+
+# sfc-1: A* on point cloud grid (means), SFC on means, buffer by robot radius   (expected: unsafe, but polytopes large. Infeasible often)
+# sfc-2: A* on point cloud grid (sampled surface), SFC on sampled surface, buffer by robot radius (expected: slightly unsafe, but polytopes slightly larger. Slow execution time)
+# sfc-3: A* on splat grid (means), SFC on means, buffer by robot radius (expected: unsafe, but polytopes large.)
+# sfc-4: A* on splat grid (means), SFC on means, buffer by robot radius + max eig of splat (expected: safe, but polytopes very small.)
+
+class SafeFlightCorridor(Corridor):
+    def __init__(self, gsplat, robot_config, env_config, spline_planner, device, mode) -> None:
+        super().__init__(gsplat, robot_config, env_config, spline_planner, device)
+
+        # Initialization code that is different for each type of method
+        self.mode = mode
+
+        # sfc-1: A* on point cloud grid (means), SFC on means, buffer by robot radius   (expected: unsafe, but polytopes large. Infeasible often)
+        if mode == 1:
+         
+            self.collision_set = PointCloudCollisionSet(self.gsplat, self.vmax, self.amax, self.radius, self.device)
+            
+            tnow = time.time()
+            torch.cuda.synchronize()
+
+            self.voxel_grid = PointCloudVoxel(self.collision_set.point_cloud, lower_bound=self.lower_bound, upper_bound=self.upper_bound, resolution=self.resolution, radius=self.radius, device=device)
+            
+            torch.cuda.synchronize()
+            print('Time to create Point Cloud Voxel:', time.time() - tnow)
+
+            self.point_cloud = self.collision_set.point_cloud
+
+        # sfc-2: A* on point cloud grid (sampled surface), SFC on sampled surface, buffer by robot radius (expected: slightly unsafe, but polytopes slightly larger. Slow execution time)
+        elif mode == 2:
+
+            # We choose to sample 20 points on the surface so that it is somewhat in line with how many points you might get with a Lidar.
+            self.collision_set = PointCloudCollisionSet(self.gsplat, self.vmax, self.amax, self.radius, self.device, sample_surface=20)
+            
+            tnow = time.time()
+            torch.cuda.synchronize()
+
+            self.voxel_grid = PointCloudVoxel(self.collision_set.point_cloud, lower_bound=self.lower_bound, upper_bound=self.upper_bound, resolution=self.resolution, radius=self.radius, device=device)
+            
+            torch.cuda.synchronize()
+            print('Time to create Point Cloud Voxel:', time.time() - tnow)
+
+            self.point_cloud = self.collision_set.point_cloud
+
+        # sfc-3: A* on splat grid (means), SFC on means, buffer by robot radius (expected: unsafesafe, but polytopes large.)
+        elif mode == 3:
+
+            self.collision_set = GSplatCollisionSet(self.gsplat, self.vmax, self.amax, self.radius, self.device)
+            
+            tnow = time.time()
+            torch.cuda.synchronize()
+
+            self.voxel_grid = GSplatVoxel(self.gsplat, lower_bound=self.lower_bound, upper_bound=self.upper_bound, resolution=self.resolution, radius=self.radius, device=device)
+            
+            torch.cuda.synchronize()
+            print('Time to create GSplat Voxel:', time.time() - tnow)
+           
+
+            self.point_cloud = self.collision_set.means
+
+        # sfc-4: A* on splat grid (means), SFC on means, buffer by robot radius + max eig of splat (expected: safe, but polytopes very small.)
+        elif mode == 4:
+
+            self.collision_set = GSplatCollisionSet(self.gsplat, self.vmax, self.amax, self.radius, self.device)
+            
+            tnow = time.time()
+            torch.cuda.synchronize()
+
+            self.voxel_grid = GSplatVoxel(self.gsplat, lower_bound=self.lower_bound, upper_bound=self.upper_bound, resolution=self.resolution, radius=self.radius, device=device)
+            
+            torch.cuda.synchronize()
+            print('Time to create GSplat Voxel:', time.time() - tnow)
+        
+            self.point_cloud = self.collision_set.means
+
+        else:
+            raise ValueError("Invalid mode. Please choose a mode between 1 and 4.")
+
+    def generate_initialization(self, x0, xf):
+        path = self.voxel_grid.create_path(x0, xf)
+
+        return path
+
+    def get_collision_set(self, segment):
+        output = self.collision_set.compute_set_one_step(segment)
+
+        return output       # output is a dictionary
+
+    def shrink_polytope(self, A, b, output, pivot_indices):
+
+        if self.mode == 4:
+            point_cloud_indices = output['primitive_ids']
+            pivots = point_cloud_indices[pivot_indices]     # indices of points used to generate the polytope
+
+            scales = self.collision_set.scales[pivots]      # scales of the points used to generate the polytope
+
+            # Take the maximum scale
+            max_scale = torch.max(scales, dim=-1).values
+
+            # Deflate the polytope
+            b = b - (self.radius - max_scale) * torch.norm(A, dim=-1)
+            A = A
+
+        else:
+            b = b - self.radius * torch.norm(A, dim=-1)
+            A = A
+
+        return A, b
+
+    def generate_path(self, x0, xf):
+
+        # Init times
+        times_collision_set = 0
+        times_ellipsoid = 0
+        times_polytope = 0
+
+        # Part 1: Computes the path seed using A*
+        tnow = time.time()
+        torch.cuda.synchronize()
+
+        path = self.generate_initialization(x0, xf)
+        
+        torch.cuda.synchronize()
+        time_astar = time.time() - tnow
+
+        polytopes = []      # List of polytopes (A, b)
+        segments = torch.tensor(np.stack([path[:-1], path[1:]], axis=1), device=self.device)        # line segments (N x 2 x 3)
+
+        for it, segment in enumerate(segments):
+            # If this is the first line segment, we always create a polytope. Or subsequently, we only instantiate a polytope if the line segment
+            midpoint = 0.5 * (segment[0] + segment[1])
+
+            # Test if the current segment is in the most recent polytope
+            if it > 0:
+                is_in_polytope = compute_segment_in_polytope(polytope[0], polytope[1], segment)
+            else:
+                #If we haven't created a polytope yet, so we set it to False.
+                is_in_polytope = False
+ 
+            # If first or last line segment, or when the segment is not contained in the most recent polytope, always create a polytope
+            if (it == 0) or (it == len(segments) - 1) or (not is_in_polytope):
+
+                # Part 2: Computes the collision set
+                tnow = time.time()
+                torch.cuda.synchronize()
+
+                output = self.get_collision_set(segment)
+
+                torch.cuda.synchronize()
+                times_collision_set += time.time() - tnow
+
+                box_As = output['A_bb']
+                box_bs = output['b_bb_shrunk']     # already shrunk to account for the radius of the robot
+
+                # If there are no points in the collision set, we can just use the bounding box constraints
+                if len(output['primitive_ids']) == 0:
+                    polytope = (box_As, box_bs)
+                
+                else:
+
+                    # Part 3: Compute the ellipsoid
+                    tnow = time.time()
+                    torch.cuda.synchronize()
+
+                    point_cloud = self.point_cloud[output['primitive_ids']]
+
+                    ellipsoid_R, ellipsoid_S, d, _ = find_ellipsoid(segment, point_cloud)
+
+                    torch.cuda.synchronize()
+                    times_ellipsoid += time.time() - tnow
+
+                    # Part 4: Compute the polytope
+                    tnow = time.time()
+                    torch.cuda.synchronize()
+
+                    As, bs, _, pivot_indices = find_polyhedron(point_cloud, d, ellipsoid_R, ellipsoid_S)
+
+                    # Part 5: Shrink the polytope. OK if the normals are not normalized.
+                    As, bs = self.shrink_polytope(As, bs, output, pivot_indices)
+
+                    As = torch.cat([As, box_As], dim=0)
+                    bs = torch.cat([bs, box_bs], dim=0)
+                    
+                    norm_A = torch.linalg.norm(As, dim=-1, keepdims=True)
+                    As = As / norm_A
+                    bs = bs / norm_A.squeeze()
+
+                    polytope = (As, bs)
+
+                    torch.cuda.synchronize()
+                    times_polytope += time.time() - tnow
+
+                polytopes.append(polytope)
+        
+        # Step 6: Perform Bezier spline optimization
+        tnow = time.time()
+        torch.cuda.synchronize()
+
+        traj, feasible = self.spline_planner.optimize_b_spline(polytopes, x0, xf)
+        if not feasible:
+            traj = torch.stack([x0, xf], dim=0)
+
+        torch.cuda.synchronize()
+        times_opt = time.time() - tnow
+
+        # save outputs 
+        traj_data = {
+            'path': path.tolist(),
+            'polytopes': [torch.cat([polytope[0], polytope[1].unsqueeze(-1)], dim=-1).tolist() for polytope in polytopes],
+            'num_polytopes': len(polytopes),
+            'traj': traj.tolist(),
+            'times_astar': time_astar,
+            'times_collision_set': times_collision_set,
+            'times_ellipsoid': times_ellipsoid,
+            'times_polytope': times_polytope,
+            'times_opt': times_opt,
+            'feasible': feasible
+        }
+
+        # NOTE: Save the polytope corridor as a mesh for debugging purposes. Uncomment if necessary.
+        #save_polytope(polytopes, 'sfc_corridor.obj')
+
+        return traj_data
 
 ### FOR REFERENCE ###
 
-# class Corridor():
+# class SafeFlightCorridorLegacy():
 #     def __init__(self, gsplat, robot_config, env_config, spline_planner, device) -> None:
 #         # Rs is the radius around the path, determined by the max velocity and acceleration of the robot.
 
@@ -507,7 +573,7 @@ class Corridor():
 #             # Find the closest distance and which point it corresponds to
 #             where_min = torch.argmin(dists)
 #             min_val = dists[where_min] # this is distance squared
-#             p_star = scaled_points[where_min]
+#             p_star = scaled_points.clone()[where_min]
 #             p_star_norm = p_star / torch.linalg.norm(p_star)
 
 #             # After finding the closest point, we compute the tangent hyperplane and delete those points that are outside this hyperplane
@@ -518,8 +584,8 @@ class Corridor():
 #             ps_star.append(p_star)
 
 #             # We now find and delete all points that are on or outside this hyperplane
-#             mask = torch.sum(scaled_points * p_star, dim=-1) < min_val**2 - 1e-2  # M_i, true if on the right side of the hyperplane
-#             scaled_points = scaled_points[mask] 
+#             mask = torch.sqrt(torch.sum(scaled_points * p_star, dim=-1)) < min_val  # M_i, true if on the right side of the hyperplane
+#             scaled_points = scaled_points.clone()[mask] 
 
 #         # If we only performed one iteration, we can just return the hyperplane
 
@@ -666,8 +732,7 @@ class Corridor():
 #                 self.box_bs = output['b_bb_shrunk']
 #                 times_collision_set += time.time() - tnow
 
-
-#                 if len(output['gaussian_ids']) == 0:
+#                 if len(output['primitive_ids']) == 0:
 #                     polytope = (self.box_As, self.box_bs)
                 
 #                 else:
@@ -681,7 +746,7 @@ class Corridor():
 #                     # Part 4: Compute the polytope
 #                     tnow = time.time()
 #                     As, bs, ps_star = self.find_polyhedron(point_cloud, d, ellipsoid)
-                    
+
 #                     # Part 5: Shrink the polytope
 #                     bs = bs - self.radius * torch.norm(As, dim=-1)
 
@@ -725,7 +790,7 @@ class Corridor():
 #                     self.box_bs = output['b_bb_shrunk']
 #                     times_collision_set += time.time() - tnow
 
-#                     if len(output['gaussian_ids']) == 0:
+#                     if len(output['primitive_ids']) == 0:
 #                         polytope = (self.box_As, self.box_bs)
                     
 #                     else:
@@ -739,7 +804,7 @@ class Corridor():
 #                         # Part 4: Compute the polytope
 #                         tnow = time.time()
 #                         As, bs, ps_star = self.find_polyhedron(point_cloud, d, ellipsoid)
-                        
+
 #                         # Part 5: Shrink the polytope
 #                         bs = bs - self.radius * torch.norm(As, dim=-1)
 
