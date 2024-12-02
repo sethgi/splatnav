@@ -16,8 +16,8 @@ def adjust_lightness(color, amount=0.5):
     c = colorsys.rgb_to_hls(*mc.to_rgb(c))
     return colorsys.hls_to_rgb(c[0], max(0, min(1, amount * c[1])), c[2])
 
-scene_names = ['statues', 'flight', 'old_union']
-methods = ['splatplan', 'sfc', 'ompl']
+scene_names = ['stonehenge', 'statues', 'flight', 'old_union']
+methods = ['splatplan', 'sfc-2', 'ompl']
 
 n = 100
 
@@ -37,10 +37,6 @@ for l, sparse in enumerate([False, True]):
     for k, scene_name in enumerate(scene_names):
 
         for j, method in enumerate(methods):
-
-            # TODO: WE DON"T HAVE DATA YET FOR THE SPARSE RRT
-            if sparse and method == 'ompl':
-                continue
 
             if sparse:
                 read_path = f'trajs/{scene_name}_sparse_{method}_processed.json'
@@ -64,7 +60,7 @@ for l, sparse in enumerate([False, True]):
 
             datas = meta['total_data']
 
-            if method == 'sfc':
+            if method == 'sfc-2':
                 col = '#34A853'
                 linewidth= 3
     
@@ -392,7 +388,7 @@ ax[2, 1].grid(axis='y', linewidth=2, color='k', linestyle='-', alpha=0.25, zorde
 ax[2, 1].set_axisbelow(True)
 for location in ['left', 'right', 'top', 'bottom']:
     ax[2, 1].spines[location].set_linewidth(4)
-ax[2, 1].set_ylim(0, 10)
+# ax[2, 1].set_ylim(0, 10)
 # Log plot in y
 # ax[2, 1].set_yscale('log')
 

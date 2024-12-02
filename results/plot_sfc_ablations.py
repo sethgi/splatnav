@@ -134,7 +134,7 @@ for l, sparse in enumerate([False, True]):
             # ax[0, 0].bar(k + 0.75*j/len(methods) + 0.25/2, prune_time.mean(), bottom=cbf_solve_time.mean() + qp_solve_time.mean(), width=0.15, color = adjust_lightness(col, 1.), linewidth=3, hatch='-', ec='k', label='prune')
             # ax[0, 0].bar(k + 0.75*j/len(methods) + 0.25/2, prune_time.mean() + cbf_solve_time.mean() + qp_solve_time.mean(), width=0.15, color = adjust_lightness(col, 1.), linewidth=3,  ec='k', label='prune')
 
-            plt00 = ax[0, 0].bar(k + 0.75*j/len(methods) + 0.25/2 + l/10, times.sum(axis=1).mean(), width=0.15, color=col, capsize=10, edgecolor=adjust_lightness(col, 0.5), linewidth=linewidth, 
+            plt00 = ax[0, 0].bar(k + 0.85*j/len(methods) + 0.25/2 + l/20, times.sum(axis=1).mean(), width=0.075, color=col, capsize=10, edgecolor=adjust_lightness(col, 0.5), linewidth=1, 
                         linestyle='-', joinstyle='round', rasterized=True)
 
             # Safety Margin
@@ -144,8 +144,8 @@ for l, sparse in enumerate([False, True]):
             # ax[0, 1].errorbar(k + 0.75*j/len(methods) + 0.25/2, safety.mean().reshape(-1, 1), yerr=errors, color=adjust_lightness(col, 0.5), markeredgewidth=5, capsize=15, elinewidth=5, alpha=0.5)
             # ax[0, 1].scatter( np.repeat((k + 0.75*j/len(methods) + 0.25/2), len(safety)), safety, s=250, color=col, alpha=0.04)
             # ax[0, 1].scatter(k +  + 0.75*j/len(methods) + 0.25/2 - 0.13 + l/10, safety.mean(), s=200, color=col, alpha=1, marker='>')
-            ax[0, 1].scatter(k +  + 0.75*j/len(methods) + 0.25/2 + l/10, safety.mean(), s=200, color='k', alpha=1, marker='4')
-            violinplot = ax[0, 1].violinplot(safety, positions=[k + 0.75*j/len(methods) + 0.25/2 + l/10], widths=0.1, showmeans=False, showextrema=False, showmedians=False)
+            ax[0, 1].scatter(k + 0.85*j/len(methods) + 0.25/2 + l/20, safety.mean(), s=200, color='k', alpha=1, marker='4')
+            violinplot = ax[0, 1].violinplot(safety, positions=[k + 0.85*j/len(methods) + 0.25/2 + l/20], widths=0.075, showmeans=False, showextrema=False, showmedians=False)
 
             for pc in violinplot['bodies']:
                 # pc.set_facecolor(col)
@@ -161,8 +161,8 @@ for l, sparse in enumerate([False, True]):
             # ax[1, 0].scatter( np.repeat((k + 0.75*j/len(methods) + 0.25/2), len(polytope_safety)), polytope_safety, s=250, color=col, alpha=0.04)
             # ax[1, 0].scatter(k +  + 0.75*j/len(methods) + 0.25/2 - 0.13, polytope_safety.mean(), s=200, color=col, alpha=1, marker='>')
 
-            ax[1, 0].scatter(k +  + 0.75*j/len(methods) + 0.25/2 + l/10, polytope_safety.mean(), s=200, color='k', alpha=1, marker='4')
-            violinplot = ax[1, 0].violinplot(polytope_safety, positions=[k + 0.75*j/len(methods) + 0.25/2 + l/10], widths=0.1, showmeans=False, showextrema=False, showmedians=False)
+            ax[1, 0].scatter(k + 0.85*j/len(methods) + 0.25/2 + l/20, polytope_safety.mean(), s=200, color='k', alpha=1, marker='4')
+            violinplot = ax[1, 0].violinplot(polytope_safety, positions=[k + 0.85*j/len(methods) + 0.25/2 + l/20], widths=0.075, showmeans=False, showextrema=False, showmedians=False)
 
             for pc in violinplot['bodies']:
                 # pc.set_facecolor(col)
@@ -178,8 +178,8 @@ for l, sparse in enumerate([False, True]):
             # ax[1, 0].scatter( np.repeat((k + 0.75*j/len(methods) + 0.25/2), len(polytope_vols[:, 2])), polytope_vols[:, 2], s=250, color=col, alpha=0.04)
             # ax[1, 0].scatter(k +  + 0.75*j/len(methods) + 0.25/2 - 0.13, polytope_vols[:, 2].mean(), s=200, color=col, alpha=1, marker='>')
 
-            ax[1, 1].scatter(k +  + 0.75*j/len(methods) + 0.25/2 + l/10, polytope_vols[:, 2].mean(), s=200, color='k', alpha=1, marker='4')
-            violinplot = ax[1, 1].violinplot(polytope_vols[:, 2], positions=[k + 0.75*j/len(methods) + 0.25/2 + l/10], widths=0.1, showmeans=False, showextrema=False, showmedians=False)
+            ax[1, 1].scatter(k + 0.85*j/len(methods) + 0.25/2 + l/20, polytope_vols[:, 2].mean(), s=200, color='k', alpha=1, marker='4')
+            violinplot = ax[1, 1].violinplot(polytope_vols[:, 2], positions=[k + 0.85*j/len(methods) + 0.25/2 + l/20], widths=0.075, showmeans=False, showextrema=False, showmedians=False)
 
             for pc in violinplot['bodies']:
                 # pc.set_facecolor(col)
@@ -219,8 +219,8 @@ for l, sparse in enumerate([False, True]):
             # ax[2, 0].scatter( np.repeat((k + 0.75*j/len(methods) + 0.25/2), len(path_length)), path_length, s=250, color=col, alpha=0.04)
             # ax[2, 0].scatter(k +  + 0.75*j/len(methods) + 0.25/2 - 0.13, path_length.mean(), s=200, color=col, alpha=1, marker='>')
 
-            ax[2, 0].scatter(k +  + 0.75*j/len(methods) + 0.25/2 + l/10, path_length.mean(), s=200, color='k', alpha=1, marker='4')
-            violinplot = ax[2, 0].violinplot(path_length, positions=[k + 0.75*j/len(methods) + 0.25/2 + l/10], widths=0.1, showmeans=False, showextrema=False, showmedians=False)
+            ax[2, 0].scatter(k + 0.85*j/len(methods) + 0.25/2 + l/20, path_length.mean(), s=200, color='k', alpha=1, marker='4')
+            violinplot = ax[2, 0].violinplot(path_length, positions=[k + 0.85*j/len(methods) + 0.25/2 + l/20], widths=0.075, showmeans=False, showextrema=False, showmedians=False)
 
             for pc in violinplot['bodies']:
                 # pc.set_facecolor(col)
@@ -230,7 +230,7 @@ for l, sparse in enumerate([False, True]):
                 pc.set_alpha(0.8)
 
             # Success Rate
-            plt21 = ax[2, 1].bar(k + 0.75*j/len(methods) + 0.25/2 + l/10, int((1 - success.sum()/len(success))*100), width=0.15, color=col, capsize=10, edgecolor=adjust_lightness(col, 0.5), linewidth=linewidth, 
+            plt21 = ax[2, 1].bar(k + 0.85*j/len(methods) + 0.25/2 + l/20, int((1 - success.sum()/len(success))*100), width=0.075, color=col, capsize=10, edgecolor=adjust_lightness(col, 0.5), linewidth=1, 
                         linestyle='-', joinstyle='round', rasterized=True)
 
 
@@ -302,7 +302,7 @@ ax[2, 1].grid(axis='y', linewidth=2, color='k', linestyle='-', alpha=0.25, zorde
 ax[2, 1].set_axisbelow(True)
 for location in ['left', 'right', 'top', 'bottom']:
     ax[2, 1].spines[location].set_linewidth(4)
-ax[2, 1].set_ylim(0, 10)
+# ax[2, 1].set_ylim(0, 10)
 # Log plot in y
 # ax[2, 1].set_yscale('log')
 
