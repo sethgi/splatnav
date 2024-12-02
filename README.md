@@ -1,20 +1,3 @@
-<!-- # Splat-Nav
-### [Project Page](https://chengine.github.io/splatnav) | [Paper (arXiv)](https://arxiv.org/abs/2403.02751) | [Data](https://drive.google.com/drive/folders/1K0zfpuAti43YIBK5APFd-Yv73CvljgMC?usp=sharing)
-[Splat-Nav: Safe Real-Time Robot Navigation in
-Gaussian Splatting Maps]()  
- [Timothy Chen](https://msl.stanford.edu/people/timchen)\*<sup>1</sup>,
- [Ola Shorinwa](https://msl.stanford.edu/people/olashorinwa)\*<sup>1</sup>,
- [Joseph Bruno]()\<sup>3</sup>,
- [Javier Yu](https://msl.stanford.edu/people/javieryu)\<sup>1</sup>,
- [Weijia Zeng]()\<sup>2</sup>,
- [Aiden Swann](https://aidenswann.com/)\<sup>1</sup>,
- [Keiko Nagami](https://msl.stanford.edu/people/keikonagami)\<sup>1</sup>,
- [Philip Dames](https://engineering.temple.edu/directory/philip-dames-tug85627)\<sup>3</sup>,
- [Mac Schwager](https://web.stanford.edu/~schwager/)\<sup>1</sup>,
- <sup>1</sup>Stanford, <sup>2</sup>UC San Diego, <sup>3</sup>Temple University
-
-<img src='imgs/title.png'/> -->
-
 <p align="center">
 
   <h1 align="center"><img src="imgs/logo.svg" width="1000"></h1>
@@ -25,11 +8,11 @@ Gaussian Splatting Maps</h2>
     ·
     <a href="https://msl.stanford.edu/people/olashorinwa"><strong>Ola Shorinwa</strong><sup>1</sup></a>
     ·
-    <a><strong>Joseph Bruno</strong><sup>3</sup></a>
+    <a href="https://www.joseph-bruno.com/"><strong>Joseph Bruno</strong><sup>3</sup></a>
     ·
     <a href="https://msl.stanford.edu/people/javieryu"><strong>Javier Yu</strong><sup>1</sup></a>
     ·
-    <a><strong>Weijia Zeng</strong><sup>2</sup></a>
+    <a href="https://x.com/WeijiaZeng1"><strong>Weijia Zeng</strong><sup>2</sup></a>
     ·
     <a href="https://aidenswann.com/"><strong>Aiden Swann</strong><sup>1</sup></a>
     ·
