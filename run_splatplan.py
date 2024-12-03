@@ -31,179 +31,180 @@ sparse = False
 # method = 'sfc-*' {* can be 1, 2, 3, 4 for different modes, check SFC.corridor_utils.SafeFlightCorridor for more details} 
 ### ----------------- Possible Distance Types ----------------- ###
 
-for scene_name in ['stonehenge', 'statues', 'flight', 'old_union']:
-    for method in ['sfc-1', 'sfc-2', 'sfc-3', 'sfc-4']:
+for sparse in [False, True]:
+    for scene_name in ['stonehenge', 'statues', 'flight', 'old_union']:
+        for method in ['sfc-4']:
 
-        # NOTE: POPULATE THE UPPER AND LOWER BOUNDS FOR OTHER SCENES!!!
-        if scene_name == 'old_union':
-            radius_z = 0.01     # How far to undulate up and down
-            radius_config = 1.35/2  # radius of xy circle
-            mean_config = np.array([0.14, 0.23, -0.15]) # mean of the circle
+            # NOTE: POPULATE THE UPPER AND LOWER BOUNDS FOR OTHER SCENES!!!
+            if scene_name == 'old_union':
+                radius_z = 0.01     # How far to undulate up and down
+                radius_config = 1.35/2  # radius of xy circle
+                mean_config = np.array([0.14, 0.23, -0.15]) # mean of the circle
 
-            if sparse:
-                path_to_gsplat = Path('outputs/old_union2/sparse-splat/2024-10-25_113753/config.yml')
-            else:
-                path_to_gsplat = Path('outputs/old_union2/splatfacto/2024-09-02_151414/config.yml') # points to where the gsplat params are stored
+                if sparse:
+                    path_to_gsplat = Path('outputs/old_union2/sparse-splat/2024-10-25_113753/config.yml')
+                else:
+                    path_to_gsplat = Path('outputs/old_union2/splatfacto/2024-09-02_151414/config.yml') # points to where the gsplat params are stored
 
-            radius = 0.01       # radius of robot
-            amax = 0.1
-            vmax = 0.1
+                radius = 0.01       # radius of robot
+                amax = 0.1
+                vmax = 0.1
 
-            lower_bound = torch.tensor([-.8, -.7, -0.2], device=device)
-            upper_bound = torch.tensor([1., 1., -0.1], device=device)
+                lower_bound = torch.tensor([-.8, -.7, -0.2], device=device)
+                upper_bound = torch.tensor([1., 1., -0.1], device=device)
 
-            resolution = 100
+                resolution = 100
 
-        elif scene_name == 'stonehenge':
-            radius_z = 0.01
-            radius_config = 0.784/2
-            mean_config = np.array([-0.08, -0.03, 0.05])
+            elif scene_name == 'stonehenge':
+                radius_z = 0.01
+                radius_config = 0.784/2
+                mean_config = np.array([-0.08, -0.03, 0.05])
 
-            if sparse:
-                path_to_gsplat = Path('outputs/stonehenge/sparse-splat/2024-10-25_120323/config.yml')
-            else:
-                path_to_gsplat = Path('outputs/stonehenge/splatfacto/2024-09-11_100724/config.yml')
+                if sparse:
+                    path_to_gsplat = Path('outputs/stonehenge/sparse-splat/2024-10-25_120323/config.yml')
+                else:
+                    path_to_gsplat = Path('outputs/stonehenge/splatfacto/2024-09-11_100724/config.yml')
 
-            radius = 0.01
-            amax = 0.1
-            vmax = 0.1
+                radius = 0.01
+                amax = 0.1
+                vmax = 0.1
 
-            lower_bound = torch.tensor([-.5, -.5, -0.], device=device)
-            upper_bound = torch.tensor([.5, .5, 0.3], device=device)
+                lower_bound = torch.tensor([-.5, -.5, -0.], device=device)
+                upper_bound = torch.tensor([.5, .5, 0.3], device=device)
 
-            resolution = 150
+                resolution = 150
 
-        elif scene_name == 'statues':
-            radius_z = 0.03    
-            radius_config = 0.475
-            mean_config = np.array([-0.064, -0.0064, -0.025])
+            elif scene_name == 'statues':
+                radius_z = 0.03    
+                radius_config = 0.475
+                mean_config = np.array([-0.064, -0.0064, -0.025])
 
-            if sparse:
-                path_to_gsplat = Path('outputs/statues/sparse-splat/2024-10-25_114702/config.yml')
-            else:
-                path_to_gsplat = Path('outputs/statues/splatfacto/2024-09-11_095852/config.yml')
+                if sparse:
+                    path_to_gsplat = Path('outputs/statues/sparse-splat/2024-10-25_114702/config.yml')
+                else:
+                    path_to_gsplat = Path('outputs/statues/splatfacto/2024-09-11_095852/config.yml')
 
-            radius = 0.03
-            amax = 0.1
-            vmax = 0.1
+                radius = 0.03
+                amax = 0.1
+                vmax = 0.1
 
-            lower_bound = torch.tensor([-.5, -.5, -0.3], device=device)
-            upper_bound = torch.tensor([.5, .5, 0.2], device=device)
+                lower_bound = torch.tensor([-.5, -.5, -0.3], device=device)
+                upper_bound = torch.tensor([.5, .5, 0.2], device=device)
 
-            resolution = 100
+                resolution = 100
 
-        elif scene_name == 'flight':
-            radius_z = 0.06
-            radius_config = 0.545/2
-            mean_config = np.array([0.19, 0.01, -0.02])
+            elif scene_name == 'flight':
+                radius_z = 0.06
+                radius_config = 0.545/2
+                mean_config = np.array([0.19, 0.01, -0.02])
 
-            if sparse:
-                path_to_gsplat = Path('outputs/flight/sparse-splat/2024-10-25_115216/config.yml')
-            else:
-                path_to_gsplat = Path('outputs/flight/splatfacto/2024-09-12_172434/config.yml')
+                if sparse:
+                    path_to_gsplat = Path('outputs/flight/sparse-splat/2024-10-25_115216/config.yml')
+                else:
+                    path_to_gsplat = Path('outputs/flight/splatfacto/2024-09-12_172434/config.yml')
 
-            radius = 0.02
-            amax = 0.1
-            vmax = 0.1
+                radius = 0.02
+                amax = 0.1
+                vmax = 0.1
 
-            lower_bound = torch.tensor([-1.33, -0.5, -0.17], device=device)
-            upper_bound = torch.tensor([1, 0.5, 0.26], device=device)
+                lower_bound = torch.tensor([-1.33, -0.5, -0.17], device=device)
+                upper_bound = torch.tensor([1, 0.5, 0.26], device=device)
 
-            resolution = 100
+                resolution = 100
 
-        print(f"Running {scene_name} with {method}")
+            print(f"Running {scene_name} with {method}")
 
-        # Robot configuration
-        robot_config = {
-            'radius': radius,
-            'vmax': vmax,
-            'amax': amax,
-        }
+            # Robot configuration
+            robot_config = {
+                'radius': radius,
+                'vmax': vmax,
+                'amax': amax,
+            }
 
-        # Environment configuration (specifically voxel)
-        voxel_config = {
-            'lower_bound': lower_bound,
-            'upper_bound': upper_bound,
-            'resolution': resolution,
-        }
-
-        tnow = time.time()
-        gsplat = GSplatLoader(path_to_gsplat, device)
-        print('Time to load GSplat:', time.time() - tnow)
-
-        spline_planner = SplinePlanner(spline_deg=6, device=device)
-        
-        if method == 'splatplan':
-            planner = SplatPlan(gsplat, robot_config, voxel_config, spline_planner, device)
-
-            # Creates the voxel grid for visualization
-            # if sparse:
-            #     planner.gsplat_voxel.create_mesh(f'blender_envs/{scene_name}_sparse_voxel.obj')
-            # else:
-            #     planner.gsplat_voxel.create_mesh(f'blender_envs/{scene_name}_voxel.obj')
-
-        elif method.split("-")[0] == "sfc":
-            mode = int(method.split("-")[1])
-            planner = SafeFlightCorridor(gsplat, robot_config, voxel_config, spline_planner, device, mode=mode)
-
-        else:
-            raise ValueError(f"Method {method} not recognized")
-
-        ### Create configurations in a circle
-        x0 = np.stack([radius_config*np.cos(t), radius_config*np.sin(t), radius_z * np.sin(t_z)], axis=-1)     # starting positions
-        x0 = x0 + mean_config
-
-        xf = np.stack([radius_config*np.cos(t + np.pi), radius_config*np.sin(t + np.pi), radius_z * np.sin(t_z + np.pi)], axis=-1)     # goal positions
-        xf = xf + mean_config
-
-        # Run simulation
-        total_data = []
-        
-        for trial, (start, goal) in enumerate(zip(x0, xf)):
-
-            # State is 6D. First 3 are position, last 3 are velocity. Set initial and final velocities to 0
-            x = torch.tensor(start).to(device).to(torch.float32)
-            goal = torch.tensor(goal).to(device).to(torch.float32)
+            # Environment configuration (specifically voxel)
+            voxel_config = {
+                'lower_bound': lower_bound,
+                'upper_bound': upper_bound,
+                'resolution': resolution,
+            }
 
             tnow = time.time()
-            torch.cuda.synchronize()
+            gsplat = GSplatLoader(path_to_gsplat, device)
+            print('Time to load GSplat:', time.time() - tnow)
 
-            output = planner.generate_path(x, goal)
+            spline_planner = SplinePlanner(spline_deg=6, device=device)
+            
+            if method == 'splatplan':
+                planner = SplatPlan(gsplat, robot_config, voxel_config, spline_planner, device)
 
-            torch.cuda.synchronize()
-            plan_time = time.time() - tnow
-            output['plan_time'] = plan_time
+                # Creates the voxel grid for visualization
+                # if sparse:
+                #     planner.gsplat_voxel.create_mesh(f'blender_envs/{scene_name}_sparse_voxel.obj')
+                # else:
+                #     planner.gsplat_voxel.create_mesh(f'blender_envs/{scene_name}_voxel.obj')
 
-            total_data.append(output)
-            print(f"Trial {trial} completed")
+            elif method.split("-")[0] == "sfc":
+                mode = int(method.split("-")[1])
+                planner = SafeFlightCorridor(gsplat, robot_config, voxel_config, spline_planner, device, mode=mode)
 
-        # Save trajectory
-        data = {
-            'scene': scene_name,
-            'method': method,
-            'radius': radius,
-            'amax': amax,
-            'vmax': vmax,
-            'radius_z': radius_z,
-            'radius_config': radius_config,
-            'mean_config': mean_config.tolist(),
-            'lower_bound': lower_bound.tolist(),
-            'upper_bound': upper_bound.tolist(),
-            'resolution': resolution,
-            'n_steps': n_steps,
-            'total_data': total_data,
-        }
+            else:
+                raise ValueError(f"Method {method} not recognized")
 
-        # create directory if it doesn't exist
-        os.makedirs('trajs', exist_ok=True)
-        
-        # write to the file
-        if sparse:
-            save_path = f'trajs/{scene_name}_sparse_{method}.json'
-        else:
-            save_path = f'trajs/{scene_name}_{method}.json'
-        
-        with open(save_path, 'w') as f:
-            json.dump(data, f, indent=4)
+            ### Create configurations in a circle
+            x0 = np.stack([radius_config*np.cos(t), radius_config*np.sin(t), radius_z * np.sin(t_z)], axis=-1)     # starting positions
+            x0 = x0 + mean_config
+
+            xf = np.stack([radius_config*np.cos(t + np.pi), radius_config*np.sin(t + np.pi), radius_z * np.sin(t_z + np.pi)], axis=-1)     # goal positions
+            xf = xf + mean_config
+
+            # Run simulation
+            total_data = []
+            
+            for trial, (start, goal) in enumerate(zip(x0, xf)):
+
+                # State is 6D. First 3 are position, last 3 are velocity. Set initial and final velocities to 0
+                x = torch.tensor(start).to(device).to(torch.float32)
+                goal = torch.tensor(goal).to(device).to(torch.float32)
+
+                tnow = time.time()
+                torch.cuda.synchronize()
+
+                output = planner.generate_path(x, goal)
+
+                torch.cuda.synchronize()
+                plan_time = time.time() - tnow
+                output['plan_time'] = plan_time
+
+                total_data.append(output)
+                print(f"Trial {trial} completed")
+
+            # Save trajectory
+            data = {
+                'scene': scene_name,
+                'method': method,
+                'radius': radius,
+                'amax': amax,
+                'vmax': vmax,
+                'radius_z': radius_z,
+                'radius_config': radius_config,
+                'mean_config': mean_config.tolist(),
+                'lower_bound': lower_bound.tolist(),
+                'upper_bound': upper_bound.tolist(),
+                'resolution': resolution,
+                'n_steps': n_steps,
+                'total_data': total_data,
+            }
+
+            # create directory if it doesn't exist
+            os.makedirs('trajs', exist_ok=True)
+            
+            # write to the file
+            if sparse:
+                save_path = f'trajs/{scene_name}_sparse_{method}.json'
+            else:
+                save_path = f'trajs/{scene_name}_{method}.json'
+            
+            with open(save_path, 'w') as f:
+                json.dump(data, f, indent=4)
         
 # %%

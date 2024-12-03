@@ -201,6 +201,7 @@ def find_polyhedron(point_cloud, midpoint, R, S):
         As = As[0][None]        # 1 x 3
         bs = bs[0].reshape(1,)    # 1
         ps_star = ps_star[0].reshape(1, -1)
+        pivot_indices = pivot_indices[0].reshape(1,)
 
     elif len(As) > 1:
         # otherwise we stack them

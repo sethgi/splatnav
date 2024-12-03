@@ -19,8 +19,8 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 #sparse = False
 
 for sparse in [True, False]:
-    for method in ['splat-plan', 'ompl', 'sfc-2']:
-        for scene_name in ['stonehenge', 'statues', 'flight', 'old_union']:
+    for method in ['sfc-4']:
+        for scene_name in ['stonehenge']:
 
             # TODO: POPULATE THE UPPER AND LOWER BOUNDS FOR FASTER DISTANCE QUERYING!!!
             if scene_name == 'old_union':
@@ -87,6 +87,10 @@ for sparse in [True, False]:
                     continue
                 elif len(data['traj']) >= 1 and method == 'ompl':
                     data['feasible'] = True
+
+                if not data['feasible']:
+                    total_data_processed.append(data)
+                    continue
 
                 traj = torch.tensor(data['traj'], device=device)[:, :3]
 
