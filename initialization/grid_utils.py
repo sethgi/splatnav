@@ -111,7 +111,50 @@ class PointCloudVoxel(Voxel):
         self.point_cloud = point_cloud
     
         with torch.no_grad():
+            self.generate_kernel()
             self.create_navigable_grid()
+
+    def generate_kernel(self):
+        # Functions find the voxelized overapproximation of the Minkowski sum 
+
+        rad_cell = torch.ceil(self.radius / self.cell_sizes - 0.5)
+        lower_bound = -rad_cell
+        upper_bound = rad_cell
+
+        resolution = (2*upper_bound + 1).to(dtype=torch.uint8)
+
+        # Forms the vertices of a unit cube
+        axes_mask = torch.stack([torch.tensor([0, 0, 0], device=self.device),
+                torch.tensor([1, 0, 0], device=self.device),
+                torch.tensor([0, 1, 0], device=self.device),
+                torch.tensor([0, 0, 1], device=self.device),
+                torch.tensor([1, 1, 0], device=self.device),
+                torch.tensor([1, 0, 1], device=self.device),
+                torch.tensor([0, 1, 1], device=self.device),
+                torch.tensor([1, 1, 1], device=self.device)], dim=0)    # 8 x 3
+
+        # Form the lower grid vertex
+        X, Y, Z = torch.meshgrid(
+            torch.linspace(lower_bound[0], upper_bound[0], resolution[0], device=self.device),
+            torch.linspace(lower_bound[1], upper_bound[1], resolution[1], device=self.device),
+            torch.linspace(lower_bound[2], upper_bound[2], resolution[2], device=self.device)
+        )
+
+        # bottom vertex
+        grid_vertices = torch.stack([X, Y, Z], dim=-1)
+        grid_vertices = grid_vertices.reshape(-1, 3)
+
+        vertices = (grid_vertices[:, None, :] + axes_mask[None, ...]) * self.cell_sizes[None, None, :]
+        vertex_length = torch.linalg.norm(vertices, dim=-1)     # N x 8
+
+        vertex_mask = torch.any(vertex_length <= self.radius, dim=-1)      # N
+
+        # reshape back into grid
+        vertex_mask = vertex_mask.reshape(resolution[0], resolution[1], resolution[2])
+
+        self.robot_mask = vertex_mask
+
+        return 
 
     def create_navigable_grid(self):
         # Create a grid
@@ -133,6 +176,20 @@ class PointCloudVoxel(Voxel):
         in_grid = ( torch.all( (self.max_index - points_index) >= 0. , dim=-1) ) & ( torch.all( points_index >= 0. , dim=-1) ) 
         points_index = points_index[in_grid]
         self.non_navigable_grid[points_index[:,0], points_index[:,1], points_index[:,2]] = True
+
+        # Do convolution with the robot mask
+        kernel_size = tuple(self.robot_mask.shape)
+        padding = tuple( (torch.tensor(self.robot_mask.shape) - 1) // 2)
+        lib_module = unfoldNd.UnfoldNd(
+            kernel_size, dilation=1, padding=padding, stride=1
+        )
+        unfolded = lib_module(self.non_navigable_grid.to(dtype=torch.float32)[None, None]).squeeze()     # kernel_size x N x N x N
+        unfolded = unfolded.to(dtype=bool)
+
+        # Take the maxpool3d of the binary grid
+        mask = self.robot_mask.reshape(-1)
+        unfolded = unfolded[mask]       # mask_size x N x N x N
+        self.non_navigable = torch.any(unfolded, dim=0).reshape(self.resolution[0], self.resolution[1], self.resolution[2])  
 
 class GSplatVoxel(Voxel):
     def __init__(self, gsplat, lower_bound, upper_bound, resolution, radius, device):

@@ -16,11 +16,9 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # method = 'ompl'
 ### ----------------- Possible Distance Types ----------------- ###
 
-#sparse = False
-
 for sparse in [True, False]:
-    for method in ['sfc-4']:
-        for scene_name in ['stonehenge']:
+    for method in ['sfc-1', 'sfc-2']:
+        for scene_name in ['stonehenge', 'statues', 'flight', 'old_union']:
 
             # TODO: POPULATE THE UPPER AND LOWER BOUNDS FOR FASTER DISTANCE QUERYING!!!
             if scene_name == 'old_union':

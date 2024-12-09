@@ -33,7 +33,7 @@ sparse = False
 
 for sparse in [False, True]:
     for scene_name in ['stonehenge', 'statues', 'flight', 'old_union']:
-        for method in ['sfc-4']:
+        for method in ['sfc-1', 'sfc-2']:
 
             # NOTE: POPULATE THE UPPER AND LOWER BOUNDS FOR OTHER SCENES!!!
             if scene_name == 'old_union':
