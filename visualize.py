@@ -62,7 +62,7 @@ def as_mesh(scene_or_mesh):
 # NOTE: THIS REQUIRES CHANGING TO THE SCENE YOU WANT TO VISUALIZE
 scene_name = 'stonehenge'      # statues, stonehenge, old_union, flight. If custom scene, specify path to gsplat config file and trajectory data            
 sparse = False
-method = 'splatplan'        # splatplan or sfc
+method = 'ompl'        # splatplan or sfc
 
 # Can visualize SplatPlan and the SFC. Can also visualize the sparse scenario.
 try:
@@ -195,6 +195,27 @@ for i, data in enumerate(datas):
     colors = np.array([cmap(prog) for prog in progress])[..., :3]
     colors = colors.reshape(-1, 1, 3)
 
+    '''
+    # (Only implemented for OMPL)
+    # Add start & goal markers 
+    start = np.array(data['start'])
+    goal = np.array(data['goal'])
+    server.scene.add_icosphere(
+        name=f"/start_point_{i}",
+        position=start,
+        radius=0.005,  # Adjust radius as needed
+        color=np.array([0, 1, 0]),  # Green color for start point
+        wxyz=rotation,
+    )
+    goal = np.array(data['goal'])
+    server.scene.add_icosphere(
+        name=f"/goal_point_{i}",
+        position=goal,
+        radius=0.005,  # Adjust radius as needed
+        color=np.array([1, 0, 0]),  # Red color for goal point
+        wxyz=rotation,
+    )
+    '''
     # Add trajectory to scene
     server.scene.add_line_segments(
         name=f"/traj_{i}",
@@ -203,26 +224,27 @@ for i, data in enumerate(datas):
         line_width=10,
         wxyz=rotation,
     )
+    print(f'Method: {method}')
+    if method == 'sfc' or method == 'splatplan':
+        # Visualize the polytopes as well
+        polytopes = data['polytopes']
+        polytopes = [(np.array(polytope)[..., :3], np.array(polytope)[..., 3]) for polytope in polytopes]
 
-    # Visualize the polytopes as well
-    polytopes = data['polytopes']
-    polytopes = [(np.array(polytope)[..., :3], np.array(polytope)[..., 3]) for polytope in polytopes]
+        colors = np.array([cmap(i) for i in np.linspace(0, 1, len(polytopes))])[..., :3]
+        colors = colors.reshape(-1, 3)
+        colors = np.concatenate([colors, 0.1*np.ones((len(polytopes), 1))], axis=-1)
+        colors = (255*colors).astype(np.uint8)
 
-    colors = np.array([cmap(i) for i in np.linspace(0, 1, len(polytopes))])[..., :3]
-    colors = colors.reshape(-1, 3)
-    colors = np.concatenate([colors, 0.1*np.ones((len(polytopes), 1))], axis=-1)
-    colors = (255*colors).astype(np.uint8)
+        # Create polytope corridor mesh object
+        corridor_mesh = create_polytope_trimesh(polytopes, colors=colors)
 
-    # Create polytope corridor mesh object
-    corridor_mesh = create_polytope_trimesh(polytopes, colors=colors)
-
-    # Add the corridor to the scene
-    server.scene.add_mesh_trimesh(
-    name=f"/corridor_{i}",
-    mesh=corridor_mesh,
-    wxyz=rotation,
-    visible=False
-    )
+        # Add the corridor to the scene
+        server.scene.add_mesh_trimesh(
+        name=f"/corridor_{i}",
+        mesh=corridor_mesh,
+        wxyz=rotation,
+        visible=False
+        )
 
 while True:
     time.sleep(10.0)
