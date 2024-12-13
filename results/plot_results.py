@@ -17,7 +17,7 @@ def adjust_lightness(color, amount=0.5):
     return colorsys.hls_to_rgb(c[0], max(0, min(1, amount * c[1])), c[2])
 
 scene_names = ['stonehenge', 'statues', 'flight', 'old_union']
-methods = ['splatplan', 'sfc-2', 'ompl']
+methods = ['splatplan', 'sfc-2', 'ompl', 'nerfnav']
 
 fig, ax = plt.subplots(2, 2, figsize=(10, 10), dpi=200)
 
@@ -27,6 +27,17 @@ font = {
         'size'   : 15}
 
 matplotlib.rc('font', **font)
+ax[0,0].axvspan(0., 1.1, facecolor='gray', alpha=0.7)
+ax[0,0].axvspan(2.2, 3.3, facecolor='gray', alpha=0.7)
+
+ax[1,0].axvspan(0., 1.1, facecolor='gray', alpha=0.7)
+ax[1,0].axvspan(2.2, 3.3, facecolor='gray', alpha=0.7)
+
+ax[1,1].axvspan(0., 1.1, facecolor='gray', alpha=0.7)
+ax[1,1].axvspan(2.2, 3.3, facecolor='gray', alpha=0.7)
+
+ax[0,1].axvspan(0., 1.1, facecolor='gray', alpha=0.7)
+ax[0,1].axvspan(2.2, 3.3, facecolor='gray', alpha=0.7)
 
 for l, sparse in enumerate([False, True]):
     for k, scene_name in enumerate(scene_names):
@@ -34,6 +45,8 @@ for l, sparse in enumerate([False, True]):
         for j, method in enumerate(methods):
 
             if sparse:
+                if method == 'nerfnav':
+                    continue
                 read_path = f'trajs/{scene_name}_sparse_{method}_processed.json'
             else:
                 read_path = f'trajs/{scene_name}_{method}_processed.json'
@@ -194,38 +207,66 @@ for l, sparse in enumerate([False, True]):
                 print(f'{scene_name}_{method}')
                 print('success rate', success.sum()/len(success))
 
-            # elif method == 'nerf-nav':
-            #     col = '#EA4335'
-            #     linewidth=3
+            elif method == 'nerfnav':
+                col = '#EA4335'
+                linewidth=3
+
+                # Per trajectory
+                for i, data in enumerate(datas):
+
+                    # If the trajectory wasn't feasible to solve, we don't store any data on it besides the success.
+                    if not data['feasible']:
+                        success.append(False)
+                        continue
+                    else:
+                        success.append(True)
+
+                    # record the times
+                    traj_time = np.array(data['plan_time'])
+                    times.append(traj_time)
+                    
+                    # record the min safety margin
+                    safety.append(np.array(data['safety_margin']).min())
+                    path_length.append(data['path_length'])
+
+                success = np.array(success)
+                safety = np.array(safety)
+                times = np.array(times)
+                path_length = np.array(path_length)
+
+                print(f'{scene_name}_{method}')
+                print('success rate', success.sum()/len(success))
 
             print(f'{scene_name}_{method}')
 
             # Computation Time
+            if method == 'ompl' or method == 'nerfnav':
+                if method == 'nerfnav':
+                    # No sparse version for nerfnav
+                    width = 0.15
+                    offset = 0.04
+                else:
+                    width = 0.075
+                    offset = l/10
 
-            # TODO: This plots the individual times of each component of the algorithm
-            # ax[0, 0].bar(k + 0.75*j/len(methods) + 0.25/2, qp_solve_time.mean(), bottom = 0, width=0.15, color= adjust_lightness(col, 0.5), linewidth=3, ec='k', label='qp')
-            # ax[0, 0].bar(k + 0.75*j/len(methods) + 0.25/2, cbf_solve_time.mean(), bottom=qp_solve_time.mean(), width=0.15, color=adjust_lightness(col, 1.0), linewidth=3, ec='k', label='cbf')
-            # ax[0, 0].bar(k + 0.75*j/len(methods) + 0.25/2, prune_time.mean(), bottom=cbf_solve_time.mean() + qp_solve_time.mean(), width=0.15, color = adjust_lightness(col, 1.), linewidth=3, hatch='-', ec='k', label='prune')
-            # ax[0, 0].bar(k + 0.75*j/len(methods) + 0.25/2, prune_time.mean() + cbf_solve_time.mean() + qp_solve_time.mean(), width=0.15, color = adjust_lightness(col, 1.), linewidth=3,  ec='k', label='prune')
-
-            # TODO: This plots just the total time
-            if method == 'ompl' or method == 'nerf-nav':
-                plt00 = ax[0, 0].bar(k + 0.75*j/len(methods) + 0.25/2 + l/10, times.mean(), width=0.1, color=col, capsize=10, edgecolor=adjust_lightness(col, 0.5), linewidth=linewidth, 
+                plt00 = ax[1, 0].bar(1.1*k + j/len(methods) + 0.25/2 + offset, times.mean(), width=width, color=col, capsize=10, edgecolor=adjust_lightness(col, 0.5), linewidth=linewidth, 
                             linestyle='-', joinstyle='round', rasterized=True)
                 
             else:
-                plt00 = ax[0, 0].bar(k + 0.75*j/len(methods) + 0.25/2 + l/10, times.sum(axis=1).mean(), width=0.1, color=col, capsize=10, edgecolor=adjust_lightness(col, 0.5), linewidth=linewidth, 
+                plt00 = ax[1, 0].bar(1.1*k + j/len(methods) + 0.25/2 + l/10, times.sum(axis=1).mean(), width=0.075, color=col, capsize=10, edgecolor=adjust_lightness(col, 0.5), linewidth=linewidth, 
                             linestyle='-', joinstyle='round', rasterized=True)
 
             # Safety Margin
             # For trajectory points
-            # errors = np.abs(safety.mean().reshape(-1, 1) - np.array([safety.min(), safety.max()]).reshape(-1, 1))
+            if method == 'nerfnav':
+                # No sparse version for nerfnav
+                width = 0.15
+                offset = 0.04
+            else:
+                width = 0.075
+                offset = l/10
 
-            # ax[0, 1].errorbar(k + 0.75*j/len(methods) + 0.25/2, safety.mean().reshape(-1, 1), yerr=errors, color=adjust_lightness(col, 0.5), markeredgewidth=5, capsize=15, elinewidth=5, alpha=0.5)
-            # ax[0, 1].scatter( np.repeat((k + 0.75*j/len(methods) + 0.25/2), len(safety)), safety, s=250, color=col, alpha=0.04)
-            # ax[0, 1].scatter(k +  + 0.75*j/len(methods) + 0.25/2 - 0.13 + l/10, safety.mean(), s=200, color=col, alpha=1, marker='>')
-            ax[0, 1].scatter(k +  + 0.75*j/len(methods) + 0.25/2 + l/10, safety.mean(), s=200, color='k', alpha=1, marker='4')
-            violinplot = ax[0, 1].violinplot(safety, positions=[k + 0.75*j/len(methods) + 0.25/2 + l/10], widths=0.1, showmeans=False, showextrema=False, showmedians=False)
+            violinplot = ax[0, 1].violinplot(safety, positions=[1.1*k + j/len(methods) + 0.25/2 + offset], widths=width, showmeans=False, showextrema=False, showmedians=False)
 
             for pc in violinplot['bodies']:
                 # pc.set_facecolor(col)
@@ -234,15 +275,18 @@ for l, sparse in enumerate([False, True]):
                 pc.set_color(col)
                 pc.set_alpha(0.8)
 
+            ax[0, 1].scatter(1.1*k + j/len(methods) + 0.25/2 + offset, safety.mean(), s=100, color='k', alpha=0.5, marker='4')
+
             # Path Length
-            # errors = np.abs(path_length.mean().reshape(-1, 1) - np.array([path_length.min(), path_length.max()]).reshape(-1, 1))
+            if method == 'nerfnav':
+                # No sparse version for nerfnav
+                width = 0.15
+                offset = 0.04
+            else:
+                width = 0.075
+                offset = l/10
 
-            # ax[2, 0].errorbar(k + 0.75*j/len(methods) + 0.25/2, path_length.mean().reshape(-1, 1), yerr=errors, color=adjust_lightness(col, 0.5), markeredgewidth=5, capsize=15, elinewidth=5, alpha=0.5)
-            # ax[2, 0].scatter( np.repeat((k + 0.75*j/len(methods) + 0.25/2), len(path_length)), path_length, s=250, color=col, alpha=0.04)
-            # ax[2, 0].scatter(k +  + 0.75*j/len(methods) + 0.25/2 - 0.13, path_length.mean(), s=200, color=col, alpha=1, marker='>')
-
-            ax[1, 0].scatter(k +  + 0.75*j/len(methods) + 0.25/2 + l/10, path_length.mean(), s=200, color='k', alpha=1, marker='4')
-            violinplot = ax[1, 0].violinplot(path_length, positions=[k + 0.75*j/len(methods) + 0.25/2 + l/10], widths=0.1, showmeans=False, showextrema=False, showmedians=False)
+            violinplot = ax[1, 1].violinplot(path_length, positions=[1.1*k + j/len(methods) + 0.25/2 + offset], widths=width, showmeans=False, showextrema=False, showmedians=False)
 
             for pc in violinplot['bodies']:
                 # pc.set_facecolor(col)
@@ -251,21 +295,31 @@ for l, sparse in enumerate([False, True]):
                 pc.set_color(col)
                 pc.set_alpha(0.8)
 
+            ax[1, 1].scatter(1.1*k + j/len(methods) + 0.25/2 + offset, path_length.mean(), s=100, color='k', alpha=0.5, marker='4')
+
             # Success Rate
-            plt21 = ax[1, 1].bar(k + 0.75*j/len(methods) + 0.25/2 + l/10, int((1 - success.sum()/len(success))*100), width=0.1, color=col, capsize=10, edgecolor=adjust_lightness(col, 0.5), linewidth=linewidth, 
+            if method == 'nerfnav':
+                # No sparse version for nerfnav
+                width = 0.15
+                offset = 0.04
+            else:
+                width = 0.075
+                offset = l/10
+            plt21 = ax[0, 0].bar(1.1*k + j/len(methods) + 0.25/2 + offset, int((1 - success.sum()/len(success))*100), width=0.075, color=col, capsize=10, edgecolor=adjust_lightness(col, 0.5), linewidth=linewidth, 
                         linestyle='-', joinstyle='round', rasterized=True)
 
 
 # COMPUTATION TIME
-ax[0, 0].set_title(r'Computation Time (s) $\downarrow$' , fontsize=20, fontweight='bold')
-ax[0, 0].get_xaxis().set_visible(False)
-ax[0, 0].grid(which='both', axis='y', linewidth=1, color='k', linestyle=':', alpha=0.25, zorder=0)
-ax[0, 0].set_axisbelow(True)
+ax[1, 0].set_title(r'Computation Time (s) $\downarrow$' , fontsize=20, fontweight='bold')
+ax[1, 0].get_xaxis().set_visible(False)
+ax[1, 0].grid(which='both', axis='y', linewidth=1, color='k', linestyle=':', alpha=0.25, zorder=0)
+ax[1, 0].set_axisbelow(True)
 for location in ['left', 'right', 'top', 'bottom']:
-    ax[0, 0].spines[location].set_linewidth(4)
-ax[0, 0].tick_params(which='major', direction="in", length=8, width=1)
-ax[0, 0].tick_params(which='minor', direction="in", length=4, width=1)
-ax[0,0].set_yscale('log')
+    ax[1, 0].spines[location].set_linewidth(4)
+ax[1, 0].tick_params(which='major', direction="in", length=8, width=1)
+ax[1, 0].tick_params(which='minor', direction="in", length=4, width=1)
+ax[1,0].set_yscale('log')
+ax[1, 0].set_xlim(0., 4.4)
 
 # SAFETY MARGIN
 ax[0, 1].set_title('Min. Distance (Traj)', fontsize=20, fontweight='bold')
@@ -273,25 +327,30 @@ ax[0, 1].get_xaxis().set_visible(False)
 ax[0, 1].axhline(y = 0., color = 'k', linestyle = '-', linewidth=3, alpha=0.7, zorder=0) 
 ax[0, 1].grid(axis='y', linewidth=2, color='k', linestyle='-', alpha=0.25, zorder=0)
 ax[0, 1].set_axisbelow(True)
+ax[0, 1].yaxis.tick_right()
 for location in ['left', 'right', 'top', 'bottom']:
     ax[0, 1].spines[location].set_linewidth(4)
+ax[0, 1].set_xlim(0., 4.4)
 
 # PATH LENGTH
-ax[1, 0].set_title(r'Path Length $\downarrow$', fontsize=20, fontweight='bold')
-ax[1, 0].get_xaxis().set_visible(False)
-ax[1, 0].grid(axis='y', linewidth=2, color='k', linestyle='-', alpha=0.25, zorder=0)
-ax[1, 0].set_axisbelow(True)
-for location in ['left', 'right', 'top', 'bottom']:
-    ax[1, 0].spines[location].set_linewidth(4)
-
-# SUCCESS RATE
-ax[1, 1].set_title(r'Failure Rate (%) $\downarrow$', fontsize=20, fontweight='bold')
+ax[1, 1].set_title(r'Path Length $\downarrow$', fontsize=20, fontweight='bold')
 ax[1, 1].get_xaxis().set_visible(False)
 ax[1, 1].grid(axis='y', linewidth=2, color='k', linestyle='-', alpha=0.25, zorder=0)
 ax[1, 1].set_axisbelow(True)
+ax[1, 1].yaxis.tick_right()
 for location in ['left', 'right', 'top', 'bottom']:
     ax[1, 1].spines[location].set_linewidth(4)
+ax[1, 1].set_xlim(0., 4.4)
 
-plt.savefig(f'simulation_stats.png', dpi=500)
+# SUCCESS RATE
+ax[0, 0].set_title(r'Failure Rate (%) $\downarrow$', fontsize=20, fontweight='bold')
+ax[0, 0].get_xaxis().set_visible(False)
+ax[0, 0].grid(axis='y', linewidth=2, color='k', linestyle='-', alpha=0.25, zorder=0)
+ax[0, 0].set_axisbelow(True)
+for location in ['left', 'right', 'top', 'bottom']:
+    ax[0, 0].spines[location].set_linewidth(4)
+ax[0, 0].set_xlim(0., 4.4)
+plt.tight_layout()
+plt.savefig(f'simulation_stats.pdf', dpi=2000)
 
 #%%
