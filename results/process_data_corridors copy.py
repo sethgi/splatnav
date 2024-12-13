@@ -16,8 +16,8 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # method = 'ompl'
 ### ----------------- Possible Distance Types ----------------- ###
 
-for sparse in [True, False]:
-    for method in ['sfc-1', 'sfc-2']:
+for sparse in [False]:
+    for method in ['nerfnav']:
         for scene_name in ['stonehenge', 'statues', 'flight', 'old_union']:
 
             # TODO: POPULATE THE UPPER AND LOWER BOUNDS FOR FASTER DISTANCE QUERYING!!!
@@ -83,8 +83,9 @@ for sparse in [True, False]:
                     data['feasible'] = False
                     total_data_processed.append(data)
                     continue
-                elif len(data['traj']) >= 1 and method == 'ompl':
-                    data['feasible'] = True
+                elif len(data['traj']) >= 1:
+                    if method == 'ompl' or method == 'nerfnav':
+                        data['feasible'] = True
 
                 if not data['feasible']:
                     total_data_processed.append(data)
@@ -111,7 +112,7 @@ for sparse in [True, False]:
                 data['safety_margin'] = safety_margin
                 data['path_length'] = path_length
 
-                if method == 'ompl':
+                if method == 'ompl' or method == 'nerfnav':
                     pass
                 else:
                     # Quality of polytopes

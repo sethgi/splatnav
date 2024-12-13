@@ -16,8 +16,8 @@ from numpy import linalg as la
     
 ################### FOR OUR METHOD ################################
 
-scene_name = 'flight'
-method = 'sfc'
+scene_name = 'old_union'
+method = 'nerfnav'
 base = Path(bpy.path.abspath('//'))
 parent = base.parent
 

@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import numpy.linalg as la
 import heapq 
+import itertools
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -190,7 +191,7 @@ def next_rotation(R, omega, dt):
     # Propagate rotation matrix using exponential map of the angle displacements
     angle = omega*dt
     theta = torch.norm(angle, p=2)
-    if torch.abs(theta) <= 1e-3:
+    if torch.abs(theta) <= 1e-10:
         exp_i = torch.eye(3).to(R.device)
     else:
         angle_norm = angle / theta
@@ -258,3 +259,24 @@ def astar(occupied, start, goal):
                     heapq.heappush(open_heap, node) 
 
     raise ValueError("Failed to find path!")
+
+def sample_sphere(radius, n):
+    # Will yield n^3 number of samples
+
+    phi = torch.linspace(0.,2*np.pi, n+1)[:-1]
+    costheta = torch.linspace(-1.,1., n+1)[:-1]
+    u = torch.linspace(0.,1., n+1)[1:]
+
+    theta = torch.arccos( costheta )
+    r = radius * (u**(1/3))
+    combinations = torch.tensor(list(itertools.product(r, theta, phi)))
+
+    positions = torch.stack([
+        combinations[:, 0] * torch.sin(combinations[:, 1]) * torch.cos(combinations[:, 2]),
+        combinations[:, 0] * torch.sin(combinations[:, 1]) * torch.sin(combinations[:, 2]),
+        combinations[:, 0] * torch.cos(combinations[:, 1])
+    ], dim=-1)
+
+    positions = torch.cat([positions, torch.zeros(1, 3)], dim=0)
+
+    return positions

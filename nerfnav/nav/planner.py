@@ -3,25 +3,12 @@ import numpy as np
 import json
 
 from nerfnav.nav.math_utils import rot_matrix_to_vec, next_rotation, astar
-
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# TODO: IMPLEMENT SEPARATE A* VOXEL CLASS (USING UNFOLDND), AND COMPUTE ROBOT POINT CLOUD AND KERNEL SEPARATELY
-
-# phi = random(0,2pi)
-# costheta = random(-1,1)
-# u = random(0,1)
-
-# theta = arccos( costheta )
-# r = R * cuberoot( u )
-
-# x = r * sin( theta) * cos( phi )
-# y = r * sin( theta) * sin( phi )
-# z = r * cos( theta )
+from initialization.grid_utils import PointCloudVoxel
 
 class NerfNav:
-    def __init__(self, start_state, end_state, cfg, density_fn):
+    def __init__(self, start_state, end_state, cfg, density_fn, device):
         self.nerf = density_fn
+        self.device = device
 
         self.cfg                = cfg
 
@@ -39,9 +26,14 @@ class NerfNav:
 
         self.mass               = cfg['mass']
         self.J                  = cfg['I']
+        self.radius             = cfg['radius']
         self.g                  = torch.tensor([0., 0., -cfg['g']]).to(device)
 
-        self.robot_pcd          = cfg['robot_pcd']
+        self.resolution        = cfg['resolution']
+        self.lower_bound       = cfg['lower_bound']
+        self.upper_bound       = cfg['upper_bound']
+        self.cutoff            = cfg['cutoff']
+        self.robot_pcd         = cfg['robot_pcd']
 
         # Initial and Goal
         self.start_state = start_state
@@ -51,7 +43,7 @@ class NerfNav:
         self.dt = self.T_final / self.steps
 
         # Straight line trajectory initialization
-        slider = torch.linspace(0, 1, self.steps)[1:-1, None]
+        slider = torch.linspace(0, 1, self.steps, device=self.device)[1:-1, None]
 
         states = (1-slider) * self.full_to_reduced_state(start_state) + \
                     slider  * self.full_to_reduced_state(end_state)
@@ -65,48 +57,43 @@ class NerfNav:
         pos = state[:3]
         R = state[6:15].reshape((3,3))
 
-        x,y,_ = R @ torch.tensor( [1.0, 0, 0 ] )
+        x,y,_ = R @ torch.tensor( [1.0, 0., 0. ] , device=self.device)
         angle = torch.atan2(y, x)
 
-        return torch.cat( [pos, torch.tensor([angle]) ], dim = -1).detach()
+        return torch.cat( [pos, torch.tensor([angle], device=self.device) ], dim = -1).detach()
 
     def a_star_init(self):
-        side = 100 #PARAM grid size
 
-        linspace = torch.linspace(-1,1, side) #PARAM extends of the thing
-        # side, side, side, 3
-        coods = torch.stack( torch.meshgrid( linspace, linspace, linspace ), dim=-1)
+        self.cell_sizes = (self.upper_bound - self.lower_bound) / self.resolution
 
-        kernel_size = 5 # 100/5 = 20. scene size of 2 gives a box size of 2/20 = 0.1 = drone size
-        output = self.nerf(coods)
-        maxpool = torch.nn.MaxPool3d(kernel_size = kernel_size)
-        #PARAM cut off such that neural network outputs zero (pre shifted sigmoid)
+        # Voxel grid centers
+        X, Y, Z = torch.meshgrid(
+            torch.linspace(self.lower_bound[0] + self.cell_sizes[0]/2, self.upper_bound[0] - self.cell_sizes[0]/2, self.resolution, device=self.device),
+            torch.linspace(self.lower_bound[1] + self.cell_sizes[1]/2, self.upper_bound[1] - self.cell_sizes[1]/2, self.resolution, device=self.device),
+            torch.linspace(self.lower_bound[2] + self.cell_sizes[2]/2, self.upper_bound[2] - self.cell_sizes[2]/2, self.resolution, device=self.device)
+        )
+        self.grid_centers = torch.stack([X, Y, Z], dim=-1)
+        
+        coords = self.grid_centers.reshape(-1, 3)
+
+        output = self.nerf(coords)
 
         # 20, 20, 20
-        occupied = maxpool(output[None,None,...]).squeeze() > 0.3
+        occupied_mask = (output > self.cutoff).squeeze()
+        occupied_points = coords[occupied_mask]
 
-        grid_size = side//kernel_size
+        # A* and voxel grid initialization
+        self.voxel_grid = PointCloudVoxel(occupied_points, self.lower_bound, self.upper_bound, self.resolution, self.radius, self.device)
 
-        #convert to index cooredinates
-        start_grid_float = grid_size*(self.start_state[:3] + 1)/2
-        end_grid_float   = grid_size*(self.end_state  [:3] + 1)/2
-        start = tuple(int(start_grid_float[i]) for i in range(3) )
-        end =   tuple(int(end_grid_float[i]  ) for i in range(3) )
-
-        print(f'Start: {start}, End: {end}')
-        path = astar(occupied, start, end)
-
-        # convert from index cooredinates
-        squares =  2* (torch.tensor( path, dtype=torch.float)/grid_size) -1
-
-        path = torch.tensor(squares, dtype=torch.float32)
+        path = self.voxel_grid.create_path(self.start_state[:3], self.end_state[:3])
+        path = torch.tensor(path, dtype=torch.float32, device=self.device)
    
         #Diff. flat outputs (x,y,z,yaw)
-        states = torch.cat( [path, torch.zeros( (path.shape[0], 1) ) ], dim=-1)
+        states = torch.cat( [path, torch.zeros( (path.shape[0], 1) , device=self.device) ], dim=-1)
 
         #prevents weird zero derivative issues
-        randomness = torch.normal(mean= 0, std=0.01*torch.ones(states.shape) )
-        states += randomness
+        #randomness = torch.normal(mean= 0, std=0.01*torch.ones(states.shape)).to(self.device)
+        #states += randomness
 
         # smooth path (diagram of which states are averaged)
         # 1 2 3 4 5 6 7
@@ -116,7 +103,7 @@ class NerfNav:
         next_smooth = torch.cat([states[1:,:],      states[-1,None, :], ], dim=0)
         states = (prev_smooth + next_smooth + states)/3
 
-        self.states = states.clone().detach().to(device).requires_grad_(True)
+        self.states = states.clone().detach().to(self.device).requires_grad_(True)
 
     def params(self):
         return [self.initial_accel, self.states]
@@ -137,8 +124,8 @@ class NerfNav:
 
         # start, next, decision_states, last, end
 
-        start_accel = start_R @ torch.tensor([0,0,1.0]).to(device) * self.initial_accel[0] + self.g
-        next_accel = next_R @ torch.tensor([0,0,1.0]).to(device) * self.initial_accel[1] + self.g
+        start_accel = start_R @ torch.tensor([0,0,1.0]).to(self.device) * self.initial_accel[0] + self.g
+        next_accel = next_R @ torch.tensor([0,0,1.0]).to(self.device) * self.initial_accel[1] + self.g
 
         next_vel = start_v + start_accel * self.dt
         after_next_vel = next_vel + next_accel * self.dt
@@ -208,9 +195,10 @@ class NerfNav:
     def get_actions(self):
         pos, vel, accel, rot_matrix, omega, angular_accel, actions = self.calc_everything()
 
-        if not torch.allclose( actions[:2, 0], self.initial_accel ):
-            print(actions)
-            print(self.initial_accel)
+        # if not torch.allclose( actions[:2, 0], self.initial_accel ):
+        #     print(actions)
+        #     print(self.initial_accel)
+
         return actions
 
     def get_next_action(self):
@@ -228,8 +216,8 @@ class NerfNav:
     def get_state_cost(self):
         pos, vel, accel, rot_matrix, omega, angular_accel, actions = self.calc_everything()
 
-        fz = actions[:, 0].to(device)
-        torques = torch.norm(actions[:, 1:], dim=-1).to(device)
+        fz = actions[:, 0].to(self.device)
+        torques = torch.norm(actions[:, 1:], dim=-1).to(self.device)
 
         # S, B, 3  =  S, _, 3 +      _, B, 3   X    S, _,  3
         # B_body, B_omega = torch.broadcast_tensors(self.robot_body, omega[:,None,:])
@@ -237,28 +225,35 @@ class NerfNav:
 
         # S, B
         distance = torch.sum( vel**2 + 1e-5, dim = -1)**0.5
+
         # S, B
-        density = self.nerf( self.body_to_world(self.robot_body) )**2
+        density = self.nerf( self.body_to_world(self.robot_pcd) )
         density = density.squeeze()
+
+        # Ignore densities that are way too high, as they make optimization difficult
+        density = torch.clamp(density, max=1e3)
 
         # multiplied by distance to prevent it from just speed tunnelling
         # S =   S,B * S,_
-        colision_prob = torch.mean(density[None,:] * distance[:,None], dim = -1) 
+        collision_prob = torch.mean(density[None,:] * distance[:,None], dim = -1) 
 
         if self.epoch < self.fade_out_epoch:
             t = torch.linspace(0,1, colision_prob.shape[0])
             position = self.epoch/self.fade_out_epoch
-            mask = torch.sigmoid(self.fade_out_sharpness * (position - t)).to(device)
+            mask = torch.sigmoid(self.fade_out_sharpness * (position - t)).to(self.device)
             colision_prob = colision_prob * mask
 
         traj = (pos, vel, accel, rot_matrix, omega, angular_accel, actions)
 
+        diff = pos[1:] - pos[:-1]
+        diff = torch.sum(diff**2, dim=-1)
+
         #PARAM cost function shaping
-        return 1*(fz + self.g[-1])**2 + 0.01*torques**2 + self.penalty*colision_prob, self.penalty*colision_prob, traj
+        return self.penalty*torch.mean(collision_prob) + torch.mean(diff), torch.mean(collision_prob), traj
 
     def total_cost(self):
         total_cost, collision_loss, traj  = self.get_state_cost()
-        return torch.mean(total_cost) ,traj
+        return total_cost ,traj, collision_loss
 
     def learn_init(self):
         opt = torch.optim.Adam(self.params(), lr=self.lr, capturable=True)
@@ -266,15 +261,16 @@ class NerfNav:
         for it in range(self.epochs_init):
             opt.zero_grad()
             self.epoch = it
-            loss, traj = self.total_cost()
-            print(f'Iteration (it): {loss}')
+            loss, traj, coll = self.total_cost()
+            print(f'Iteration ({it}): {loss.item()}. Collision loss: {coll.item()}')
             loss.backward()
             opt.step()
 
         pos, vel, accel, rot_matrix, omega, angular_accel, actions = traj
+
         output = {
             'traj': torch.cat([pos, vel, accel], dim=-1).tolist(),
-            'angular': torch.cat([rot_matrix, omega, angular_accel], dim=-1).tolist(),
+            'angular': torch.cat([rot_matrix.reshape(-1, 9), omega, angular_accel], dim=-1).tolist(),
             'action': actions.tolist(),
         }
 
@@ -286,7 +282,7 @@ class NerfNav:
         for it in range(self.epochs_update):
             opt.zero_grad()
             self.epoch = it
-            loss = self.total_cost()
+            loss, traj, coll = self.total_cost()
             print(it, loss)
             loss.backward()
             opt.step()
