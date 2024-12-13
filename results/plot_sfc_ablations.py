@@ -28,6 +28,24 @@ font = {
 
 matplotlib.rc('font', **font)
 
+ax[0,0].axvspan(0., 1.1, facecolor='gray', alpha=0.7)
+ax[0,0].axvspan(2.2, 3.3, facecolor='gray', alpha=0.7)
+
+ax[1,0].axvspan(0., 1.1, facecolor='gray', alpha=0.7)
+ax[1,0].axvspan(2.2, 3.3, facecolor='gray', alpha=0.7)
+
+ax[1,1].axvspan(0., 1.1, facecolor='gray', alpha=0.7)
+ax[1,1].axvspan(2.2, 3.3, facecolor='gray', alpha=0.7)
+
+ax[0,1].axvspan(0., 1.1, facecolor='gray', alpha=0.7)
+ax[0,1].axvspan(2.2, 3.3, facecolor='gray', alpha=0.7)
+
+ax[2,1].axvspan(0., 1.1, facecolor='gray', alpha=0.7)
+ax[2,1].axvspan(2.2, 3.3, facecolor='gray', alpha=0.7)
+
+ax[2,0].axvspan(0., 1.1, facecolor='gray', alpha=0.7)
+ax[2,0].axvspan(2.2, 3.3, facecolor='gray', alpha=0.7)
+
 for l, sparse in enumerate([False, True]):
     for k, scene_name in enumerate(scene_names):
 
@@ -134,23 +152,23 @@ for l, sparse in enumerate([False, True]):
             # ax[0, 0].bar(k + 0.75*j/len(methods) + 0.25/2, prune_time.mean(), bottom=cbf_solve_time.mean() + qp_solve_time.mean(), width=0.15, color = adjust_lightness(col, 1.), linewidth=3, hatch='-', ec='k', label='prune')
             # ax[0, 0].bar(k + 0.75*j/len(methods) + 0.25/2, prune_time.mean() + cbf_solve_time.mean() + qp_solve_time.mean(), width=0.15, color = adjust_lightness(col, 1.), linewidth=3,  ec='k', label='prune')
 
+           # Computation Time
+            width = 0.06
+            offset = l/10
+            linewidth = 2
             try:
-                plt00 = ax[0, 0].bar(k + 0.85*j/len(methods) + 0.25/2 + l/20, times.sum(axis=1).mean(), width=0.075, color=col, capsize=10, edgecolor=adjust_lightness(col, 0.5), linewidth=1, 
-                            linestyle='-', joinstyle='round', rasterized=True)
+                plt00 = ax[1, 0].bar(1.1*k + j/len(methods) + 0.25/2 + l/10, times.sum(axis=1).mean(), width=width, color=col, capsize=10, edgecolor=adjust_lightness(col, 0.5), linewidth=linewidth, 
+                        linestyle='-', joinstyle='round', rasterized=True)
             except:
                 pass
 
             # Safety Margin
             # For trajectory points
-            # errors = np.abs(safety.mean().reshape(-1, 1) - np.array([safety.min(), safety.max()]).reshape(-1, 1))
-
-            # ax[0, 1].errorbar(k + 0.75*j/len(methods) + 0.25/2, safety.mean().reshape(-1, 1), yerr=errors, color=adjust_lightness(col, 0.5), markeredgewidth=5, capsize=15, elinewidth=5, alpha=0.5)
-            # ax[0, 1].scatter( np.repeat((k + 0.75*j/len(methods) + 0.25/2), len(safety)), safety, s=250, color=col, alpha=0.04)
-            # ax[0, 1].scatter(k +  + 0.75*j/len(methods) + 0.25/2 - 0.13 + l/10, safety.mean(), s=200, color=col, alpha=1, marker='>')
-            
+            width = 0.075
+            offset = l/10
             try:
-                ax[0, 1].scatter(k + 0.85*j/len(methods) + 0.25/2 + l/20, safety.mean(), s=200, color='k', alpha=1, marker='4')
-                violinplot = ax[0, 1].violinplot(safety, positions=[k + 0.85*j/len(methods) + 0.25/2 + l/20], widths=0.075, showmeans=False, showextrema=False, showmedians=False)
+                violinplot = ax[0, 1].violinplot(1e2*safety, positions=[1.1*k + j/len(methods) + 0.25/2 + l/10], widths=width, showmeans=False, showextrema=False, showmedians=False)
+                ax[0, 1].scatter(1.1*k + j/len(methods) + 0.25/2 + l/10, 1e2*safety.mean(), s=100, color='k', alpha=0.5, marker='4')
 
                 for pc in violinplot['bodies']:
                     # pc.set_facecolor(col)
@@ -162,15 +180,11 @@ for l, sparse in enumerate([False, True]):
                 pass
 
             # For polytope vertices
-            # errors = np.abs(polytope_safety.mean().reshape(-1, 1) - np.array([polytope_safety.min(), polytope_safety.max()]).reshape(-1, 1))
-
-            # ax[1, 0].errorbar(k + 0.75*j/len(methods) + 0.25/2, polytope_safety.mean().reshape(-1, 1), yerr=errors, color=adjust_lightness(col, 0.5), markeredgewidth=5, capsize=15, elinewidth=5, alpha=0.5)
-            # ax[1, 0].scatter( np.repeat((k + 0.75*j/len(methods) + 0.25/2), len(polytope_safety)), polytope_safety, s=250, color=col, alpha=0.04)
-            # ax[1, 0].scatter(k +  + 0.75*j/len(methods) + 0.25/2 - 0.13, polytope_safety.mean(), s=200, color=col, alpha=1, marker='>')
-
+            width = 0.075
+            offset = l/10
             try:
-                ax[1, 0].scatter(k + 0.85*j/len(methods) + 0.25/2 + l/20, polytope_safety.mean(), s=200, color='k', alpha=1, marker='4')
-                violinplot = ax[1, 0].violinplot(polytope_safety, positions=[k + 0.85*j/len(methods) + 0.25/2 + l/20], widths=0.075, showmeans=False, showextrema=False, showmedians=False)
+                violinplot = ax[1, 1].violinplot(1e2*polytope_safety, positions=[1.1*k + j/len(methods) + 0.25/2 + offset], widths=width, showmeans=False, showextrema=False, showmedians=False)
+                ax[1, 1].scatter(1.1*k + j/len(methods) + 0.25/2 + offset, 1e2*polytope_safety.mean(), s=100, color='k', alpha=0.5, marker='4')
 
                 for pc in violinplot['bodies']:
                     # pc.set_facecolor(col)
@@ -181,16 +195,13 @@ for l, sparse in enumerate([False, True]):
             except:
                 pass
 
+
             # # Polytope Volume
-            # errors = np.abs(polytope_vols[:, 2].mean().reshape(-1, 1) - np.array([polytope_vols[:, 0].min(), polytope_vols[:, 1].max()]).reshape(-1, 1))
-
-            # ax[1, 0].errorbar(k + 0.75*j/len(methods) + 0.25/2, polytope_vols[:, 2].mean().reshape(-1, 1), yerr=errors, color=adjust_lightness(col, 0.5), markeredgewidth=5, capsize=15, elinewidth=5, alpha=0.5)
-            # ax[1, 0].scatter( np.repeat((k + 0.75*j/len(methods) + 0.25/2), len(polytope_vols[:, 2])), polytope_vols[:, 2], s=250, color=col, alpha=0.04)
-            # ax[1, 0].scatter(k +  + 0.75*j/len(methods) + 0.25/2 - 0.13, polytope_vols[:, 2].mean(), s=200, color=col, alpha=1, marker='>')
-
+            width = 0.075
+            offset = l/10
             try:
-                ax[1, 1].scatter(k + 0.85*j/len(methods) + 0.25/2 + l/20, polytope_vols[:, 2].mean(), s=200, color='k', alpha=1, marker='4')
-                violinplot = ax[1, 1].violinplot(polytope_vols[:, 2], positions=[k + 0.85*j/len(methods) + 0.25/2 + l/20], widths=0.075, showmeans=False, showextrema=False, showmedians=False)
+                violinplot = ax[2, 1].violinplot(polytope_vols[:, 2]*1e3, positions=[1.1*k + j/len(methods) + 0.25/2 + offset], widths=width, showmeans=False, showextrema=False, showmedians=False)
+                ax[2, 1].scatter(1.1*k + j/len(methods) + 0.25/2 + offset, 1e3*polytope_vols[:, 2].mean(), s=100, color='k', alpha=0.5, marker='4')
 
                 for pc in violinplot['bodies']:
                     # pc.set_facecolor(col)
@@ -226,15 +237,11 @@ for l, sparse in enumerate([False, True]):
             #     pc.set_alpha(0.8)
 
             # Path Length
-            # errors = np.abs(path_length.mean().reshape(-1, 1) - np.array([path_length.min(), path_length.max()]).reshape(-1, 1))
-
-            # ax[2, 0].errorbar(k + 0.75*j/len(methods) + 0.25/2, path_length.mean().reshape(-1, 1), yerr=errors, color=adjust_lightness(col, 0.5), markeredgewidth=5, capsize=15, elinewidth=5, alpha=0.5)
-            # ax[2, 0].scatter( np.repeat((k + 0.75*j/len(methods) + 0.25/2), len(path_length)), path_length, s=250, color=col, alpha=0.04)
-            # ax[2, 0].scatter(k +  + 0.75*j/len(methods) + 0.25/2 - 0.13, path_length.mean(), s=200, color=col, alpha=1, marker='>')
-
+            width = 0.075
+            offset = l/10
             try:
-                ax[2, 0].scatter(k + 0.85*j/len(methods) + 0.25/2 + l/20, path_length.mean(), s=200, color='k', alpha=1, marker='4')
-                violinplot = ax[2, 0].violinplot(path_length, positions=[k + 0.85*j/len(methods) + 0.25/2 + l/20], widths=0.075, showmeans=False, showextrema=False, showmedians=False)
+                violinplot = ax[2, 0].violinplot(path_length, positions=[1.1*k + j/len(methods) + 0.25/2 + offset], widths=width, showmeans=False, showextrema=False, showmedians=False)
+                ax[2, 0].scatter(1.1*k + j/len(methods) + 0.25/2 + offset, path_length.mean(), s=100, color='k', alpha=0.5, marker='4')
 
                 for pc in violinplot['bodies']:
                     # pc.set_facecolor(col)
@@ -245,34 +252,57 @@ for l, sparse in enumerate([False, True]):
             except:
                 pass
 
+            # Success Rate
+            width = 0.06
+            offset = l/10
+            linewidth = 2
             try:
-                # Success Rate
-                plt21 = ax[2, 1].bar(k + 0.85*j/len(methods) + 0.25/2 + l/20, int((1 - success.sum()/len(success))*100), width=0.075, color=col, capsize=10, edgecolor=adjust_lightness(col, 0.5), linewidth=1, 
+                plt21 = ax[0, 0].bar(1.1*k + j/len(methods) + 0.25/2 + offset, int((1 - success.sum()/len(success))*100), width=width, color=col, capsize=10, edgecolor=adjust_lightness(col, 0.5), linewidth=linewidth, 
                         linestyle='-', joinstyle='round', rasterized=True)
             except:
                 pass
 
-
 # COMPUTATION TIME
-ax[0, 0].set_title(r'Computation Time (s) $\downarrow$' , fontsize=20, fontweight='bold')
-ax[0, 0].get_xaxis().set_visible(False)
-ax[0, 0].grid(which='both', axis='y', linewidth=1, color='k', linestyle=':', alpha=0.25, zorder=0)
-ax[0, 0].set_axisbelow(True)
+ax[1, 0].set_title(r'Computation Time (s) $\downarrow$' , fontsize=20, fontweight='bold')
+ax[1, 0].get_xaxis().set_visible(False)
+ax[1, 0].grid(which='both', axis='y', linewidth=1, color='k', linestyle=':', alpha=0.25, zorder=0)
+ax[1, 0].set_axisbelow(True)
 for location in ['left', 'right', 'top', 'bottom']:
-    ax[0, 0].spines[location].set_linewidth(4)
-ax[0, 0].tick_params(which='major', direction="in", length=8, width=1)
-ax[0, 0].tick_params(which='minor', direction="in", length=4, width=1)
-ax[0,0].set_yscale('log')
+    ax[1, 0].spines[location].set_linewidth(4)
+ax[1, 0].tick_params(which='major', direction="out", length=12, width=2)
+ax[1, 0].tick_params(which='minor', direction="out", length=6, width=1.5)
+ax[1, 0].set_yscale('log')
+ax[1, 0].set_xlim(0., 4.45)
 
 # SAFETY MARGIN
-ax[0, 1].set_title('Min. Distance (Traj)', fontsize=20, fontweight='bold')
+ax[0, 1].set_title(r'Min. Distance (Traj., $10^{-2}$)', fontsize=15, fontweight='bold')
 ax[0, 1].get_xaxis().set_visible(False)
 ax[0, 1].axhline(y = 0., color = 'k', linestyle = '-', linewidth=3, alpha=0.7, zorder=0) 
 ax[0, 1].grid(axis='y', linewidth=2, color='k', linestyle='-', alpha=0.25, zorder=0)
 ax[0, 1].set_axisbelow(True)
+ax[0, 1].yaxis.tick_right()
+ax[0, 1].yaxis.tick_right()
 for location in ['left', 'right', 'top', 'bottom']:
     ax[0, 1].spines[location].set_linewidth(4)
-#ax[0, 1].set_ylim(-0.0015, 0.00015)
+ax[0, 1].set_xlim(0., 4.45)
+
+# PATH LENGTH
+ax[2, 0].set_title(r'Path Length $\downarrow$', fontsize=20, fontweight='bold')
+ax[2, 0].get_xaxis().set_visible(False)
+ax[2, 0].grid(axis='y', linewidth=2, color='k', linestyle='-', alpha=0.25, zorder=0)
+ax[2, 0].set_axisbelow(True)
+for location in ['left', 'right', 'top', 'bottom']:
+    ax[2, 0].spines[location].set_linewidth(4)
+ax[2, 0].set_xlim(0., 4.45)
+
+# SUCCESS RATE
+ax[0, 0].set_title(r'Failure Rate (%) $\downarrow$', fontsize=20, fontweight='bold')
+ax[0, 0].get_xaxis().set_visible(False)
+ax[0, 0].grid(axis='y', linewidth=2, color='k', linestyle='-', alpha=0.25, zorder=0)
+ax[0, 0].set_axisbelow(True)
+for location in ['left', 'right', 'top', 'bottom']:
+    ax[0, 0].spines[location].set_linewidth(4)
+ax[0, 0].set_xlim(0., 4.45)
 
 # # POLYTOPE VOLUME
 # ax[1, 0].set_title(r'Polytope Volume $\uparrow$', fontsize=25, fontweight='bold')
@@ -290,41 +320,27 @@ for location in ['left', 'right', 'top', 'bottom']:
 # for location in ['left', 'right', 'top', 'bottom']:
 #     ax[1, 1].spines[location].set_linewidth(4)
 
-# POLYTOPE VOLUME
-ax[1, 0].set_title(r'Min. Distance (Vertices)', fontsize=20, fontweight='bold')
-ax[1, 0].get_xaxis().set_visible(False)
-ax[1, 0].grid(axis='y', linewidth=2, color='k', linestyle='-', alpha=0.25, zorder=0)
-ax[1, 0].set_axisbelow(True)
-for location in ['left', 'right', 'top', 'bottom']:
-    ax[1, 0].spines[location].set_linewidth(4)
-
-# POLYTOPE Volume
-ax[1, 1].set_title(r'Polytope Volume $\uparrow$', fontsize=20, fontweight='bold')
+# POLYTOPE Distances
+ax[1, 1].set_title(r'Min. Distance (Vertices, $10^{-2}$)', fontsize=15, fontweight='bold')
 ax[1, 1].get_xaxis().set_visible(False)
 ax[1, 1].grid(axis='y', linewidth=2, color='k', linestyle='-', alpha=0.25, zorder=0)
 ax[1, 1].set_axisbelow(True)
+ax[1, 1].yaxis.tick_right()
 for location in ['left', 'right', 'top', 'bottom']:
     ax[1, 1].spines[location].set_linewidth(4)
+ax[1, 1].set_xlim(0., 4.45)
 
-# PATH LENGTH
-ax[2, 0].set_title(r'Path Length $\downarrow$', fontsize=20, fontweight='bold')
-ax[2, 0].get_xaxis().set_visible(False)
-ax[2, 0].grid(axis='y', linewidth=2, color='k', linestyle='-', alpha=0.25, zorder=0)
-ax[2, 0].set_axisbelow(True)
-for location in ['left', 'right', 'top', 'bottom']:
-    ax[2, 0].spines[location].set_linewidth(4)
-
-# SUCCESS RATE
-ax[2, 1].set_title(r'Failure Rate (%) $\downarrow$', fontsize=20, fontweight='bold')
+# POLYTOPE Volume
+ax[2, 1].set_title(r'Polytope Volume $(10^{-3})$ $\uparrow$', fontsize=20, fontweight='bold')
 ax[2, 1].get_xaxis().set_visible(False)
 ax[2, 1].grid(axis='y', linewidth=2, color='k', linestyle='-', alpha=0.25, zorder=0)
 ax[2, 1].set_axisbelow(True)
+ax[2, 1].yaxis.tick_right()
 for location in ['left', 'right', 'top', 'bottom']:
     ax[2, 1].spines[location].set_linewidth(4)
-# ax[2, 1].set_ylim(0, 10)
-# Log plot in y
-# ax[2, 1].set_yscale('log')
+ax[2, 1].set_xlim(0., 4.45)
 
-plt.savefig(f'sfc_ablations.png', dpi=500)
+plt.tight_layout()
+plt.savefig(f'sfc_ablations.pdf', dpi=2000)
 
 #%%

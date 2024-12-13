@@ -316,9 +316,9 @@ ax[1, 0].grid(which='both', axis='y', linewidth=1, color='k', linestyle=':', alp
 ax[1, 0].set_axisbelow(True)
 for location in ['left', 'right', 'top', 'bottom']:
     ax[1, 0].spines[location].set_linewidth(4)
-ax[1, 0].tick_params(which='major', direction="in", length=8, width=1)
-ax[1, 0].tick_params(which='minor', direction="in", length=4, width=1)
-ax[1,0].set_yscale('log')
+ax[1, 0].tick_params(which='major', direction="out", length=12, width=2)
+ax[1, 0].tick_params(which='minor', direction="out", length=6, width=1.5)
+ax[1, 0].set_yscale('log')
 ax[1, 0].set_xlim(0., 4.4)
 
 # SAFETY MARGIN
