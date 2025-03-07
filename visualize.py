@@ -122,7 +122,7 @@ colors = gsplat.colors[mask]
 opacities = gsplat.opacities[mask]
 
 # Add splat to the scene
-server.scene.add_gaussian_splats(
+server.scene._add_gaussian_splats(
     name="/splats",
     centers= means.cpu().numpy(),
     covariances= covs.cpu().numpy(),
